@@ -1,4 +1,25 @@
-# Apêndice A: Comandos e estrutura do volume myext2image.img
+# ext4shell
+
+## Estrutura básica
+
+```text
+ext4shell/
+├── src/
+│   ├── main.cpp
+│   ├── ext4.cpp
+│   ├── shell.cpp
+│   └── commands.cpp
+├── include/
+│   ├── ext4.hpp
+│   ├── shell.hpp
+│   └── commands.hpp
+├── build/
+├── Makefile
+├── README.md
+└── .gitignore
+```
+
+## Apêndice: Comandos e estrutura do volume myext2image.img
 
 Gerando imagens ext4 (512MiB com blocos de 4K):
 
