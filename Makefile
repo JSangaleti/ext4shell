@@ -1,15 +1,27 @@
+# Compilador e flags
 CXX = g++
-CXXFLAGS = -Wall -Wextra -std=c++17 -Iinclude -Ithird_party/checksum
-LDFLAGS = -lcryptopp
+CXXFLAGS = -Wall -Wextra -std=c++17 -Iinclude
 
-SRC = src/main.cpp src/shell.cpp src/image.cpp src/ext4.cpp src/commands.cpp third_party/checksum/ext4checksum.cc
-TARGET = build/ext4shell
+SRC_DIR = src
+BUILD_DIR = build
+
+SRCS = $(wildcard $(SRC_DIR)/*.cpp)
+OBJS = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS))
+
+TARGET = ext4shell
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-	mkdir -p build
-	$(CXX) $(CXXFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
 clean:
-	rm -rf build
+	rm -rf $(BUILD_DIR) $(TARGET)
+
+.PHONY: all clean

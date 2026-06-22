@@ -3,3 +3,5 @@ build/
 *.out
 *.exe
 .vscode/
+/images_ext4
+ext4shell
