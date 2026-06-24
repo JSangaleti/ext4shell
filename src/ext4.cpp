@@ -41,3 +41,11 @@ void print_block(fstream& iso_file, uint32_t block_number, uint32_t block_size) 
     
     delete[] buffer;
 }
+
+void write_block(fstream& iso_file, uint32_t block_number, uint32_t block_size, const char* buffer) {
+    uint64_t offset = static_cast<uint64_t>(block_number) * block_size;
+    
+    iso_file.seekp(offset);
+    
+    iso_file.write(buffer, block_size);
+}

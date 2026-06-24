@@ -46,6 +46,4 @@ void read_superblock(fstream& iso_file, ext4_super_block& block_out, int pos);
 
 void read_block(std::fstream& iso_file, uint32_t block_number, uint32_t block_size, char* buffer);
 
-void print_superblock(const ext4_super_block& sb);
-
-void print_block(fstream& iso_file, uint32_t block_number, uint32_t block_size);
+void write_block(fstream& iso_file, uint32_t block_number, uint32_t block_size, const char* buffer);

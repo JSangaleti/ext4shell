@@ -1,15 +1,9 @@
+#include "commands.hpp"
 #include "shell.hpp"
-#include "ext4.hpp"
 
 int start_shell(fstream& iso_file){
-    struct fs
-    {
-        string path = "/";
-        uint32_t current_inode = 2;
-        uint32_t block_size;
-    };
     
-    fs state;
+    fs_state state;
     ext4_super_block super_block;
 
     try
@@ -23,43 +17,37 @@ int start_shell(fstream& iso_file){
         return 1;
     }
     
-    string comando_digitado;
+    string entry;
     
     while (true) {
 
         cout << "ext4shell:[myext4image" << state.path << "] $ ";
         
-        getline(cin, comando_digitado);
-        if (comando_digitado.empty()) continue;
+        getline(cin, entry);
+        if (entry.empty()) continue;
 
         // --- PARSER DE ARGUMENTOS ---
-        string comando, arg1;
-        stringstream ss(comando_digitado);
-        ss >> comando; // Pega a primeira palavra
-        ss >> arg1;    // Pega a segunda palavra (se existir)
+        string command, arg1, arg2;
+        stringstream ss(entry);
+        ss >> command;  // Pega o comando
+        ss >> arg1;     // Pega o primeiro argumento (se existir)
+        ss >> arg2;     // Pega o segundo argumento (se existir)
 
-        if (comando == "exit" || comando == "quit") {
+        if (command == "exit" || command == "quit") {
             break;
         }
 
-        if (comando == "info") {
-            cout << "--- INFO DO SISTEMA DE ARQUIVOS ---" << endl;
-            cout << "Tamanho do Bloco: " << state.block_size << " bytes" << endl;
-            cout << "Total de Inodes:  " << super_block.s_inodes_count << endl;
-            cout << "Total de Blocos:  " << super_block.s_blocks_count_lo << endl;
-            
-            cout << "--- ESTADO DO SHELL ---" << endl;
-            cout << "Caminho Atual:    " << state.path << endl;
-            cout << "Inode Atual:      " << state.current_inode << endl;
+        if (command == "info") {
+            info(super_block, state);
             continue;
         }
 
-        if (comando == "print_superblock") {
+        if (command == "print_superblock") {
             print_superblock(super_block);
             continue;
         }
 
-        if (comando == "print_block") {
+        if (command == "print_block") {
             if (arg1.empty()) {
                 cout << "Erro: informe o bloco. Ex: print_block 0" << endl;
                 continue;
@@ -69,6 +57,11 @@ int start_shell(fstream& iso_file){
             print_block(iso_file, num_bloco, state.block_size);
             continue;
         }
+
+        if (command == "pwd"){
+            pwd(state);
+        }
+
     }
     return 0;
 };
