@@ -62,6 +62,12 @@ int start_shell(fstream& iso_file){
             pwd(state);
         }
 
+        if (command == "print_inode") {
+            uint32_t num = arg1.empty() ? 2 : stoi(arg1);
+            print_inode(iso_file, super_block, num);
+            continue;
+        }
+
     }
     return 0;
 };

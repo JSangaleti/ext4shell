@@ -35,3 +35,14 @@ void mkdir(const string dir) { cout << "falta implementar" << endl; }
 void rm(const string file) { cout << "falta implementar" << endl; }
 void rmdir(const string dir) { cout << "falta implementar" << endl; }
 void rename(const string file, const string new_file_name) { cout << "falta implementar" << endl; }
+
+void print_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num) {
+    ext4_inode inode;
+    read_inode(iso_file, sb, inode_num, inode);
+    
+    cout << "\n--- INODE " << inode_num << " ---" << endl;
+    cout << "Tamanho: " << inode.i_size_lo << " bytes" << endl;
+    cout << "Links:   " << inode.i_links_count << endl;
+    cout << "Modo (Hex): 0x" << hex << inode.i_mode << dec << endl; 
+    cout << "Bloco 0 (Dados): " << inode.i_block[0] << endl;
+}

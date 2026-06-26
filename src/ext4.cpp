@@ -49,3 +49,31 @@ void write_block(fstream& iso_file, uint32_t block_number, uint32_t block_size, 
     
     iso_file.write(buffer, block_size);
 }
+
+void read_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, ext4_inode& inode_out) {
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    
+    // 1. Descobrir a qual grupo esse inode pertence e seu índice local
+    uint32_t group_num = (inode_num - 1) / sb.s_inodes_per_group;
+    uint32_t local_inode_idx = (inode_num - 1) % sb.s_inodes_per_group;
+
+    // 2. Achar a Tabela de Descritores (BGD)
+    // A BGD sempre fica no bloco imediatamente após o superbloco
+    uint32_t bgd_block = sb.s_first_data_block + 1;
+    
+    uint64_t bgd_offset = (static_cast<uint64_t>(bgd_block) * block_size) + (group_num * 32);
+
+    ext4_group_desc bgd;
+    iso_file.seekg(bgd_offset);
+    iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+
+    // 3. Achar o Inode dentro da tabela desse grupo
+    uint64_t inode_table_offset = static_cast<uint64_t>(bgd.bg_inode_table_lo) * block_size;
+    
+    // sb.s_inode_size é 128 ou 256 bytes
+    uint64_t exact_inode_offset = inode_table_offset + (local_inode_idx * sb.s_inode_size);
+
+    iso_file.seekg(exact_inode_offset);
+
+    iso_file.read(reinterpret_cast<char*>(&inode_out), sizeof(ext4_inode));
+}
