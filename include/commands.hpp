@@ -44,4 +44,4 @@ void print_superblock(const ext4_super_block& sb);
 
 void print_block(fstream& iso_file, const uint32_t block_number, const uint32_t block_size);
 
-void print_inodecle(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num);
+void print_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num);
