@@ -44,5 +44,6 @@ void print_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_n
     cout << "Tamanho: " << inode.i_size_lo << " bytes" << endl;
     cout << "Links:   " << inode.i_links_count << endl;
     cout << "Modo (Hex): 0x" << hex << inode.i_mode << dec << endl; 
-    cout << "Bloco 0 (Dados): " << inode.i_block[0] << endl;
+    uint64_t bloco_fisico = get_physical_block(inode, 0);
+    cout << "Bloco Fisico (Dados): " << bloco_fisico << endl;
 }

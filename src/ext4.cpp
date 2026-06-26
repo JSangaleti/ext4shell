@@ -77,3 +77,37 @@ void read_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_nu
 
     iso_file.read(reinterpret_cast<char*>(&inode_out), sizeof(ext4_inode));
 }
+
+uint64_t get_physical_block(const ext4_inode& inode, uint32_t logical_block) {
+    // 1. Lemos os primeiros 12 bytes do array i_block como o cabeçalho da árvore.
+    // O reinterpret_cast pega os bytes puros e trata como a struct ext4_extent_header.
+    const ext4_extent_header* header = reinterpret_cast<const ext4_extent_header*>(inode.i_block);
+    
+    // 2. 0xF30A é a assinatura mágica obrigatória de uma árvore de extents válida.
+    if (header->eh_magic != 0xF30A) return 0; 
+
+    // 3. Calculamos onde começam os nós da árvore.
+    // Pegamos o endereço base do i_block, tratamos como char (byte a byte) para somar 12 bytes (tamanho do cabeçalho) e trata como a struct ext4_extent.
+    const ext4_extent* extent = reinterpret_cast<const ext4_extent*>(
+        reinterpret_cast<const char*>(inode.i_block) + sizeof(ext4_extent_header)
+    );
+
+    // 4. Varremos todos os extents válidos (eh_entries) registrados no cabeçalho.
+    for (int i = 0; i < header->eh_entries; ++i) {
+        
+        // Checamos se o bloco lógico procurado pertence ao intervalo coberto por este extent.
+        if (logical_block >= extent[i].ee_block && logical_block < (extent[i].ee_block + extent[i].ee_len)) {
+            
+            // 5. O endereço físico no disco é de 48 bits, dividido em parte alta (16 bits) e baixa (32 bits).
+            // O static_cast garante que o ee_start_hi não tenha um overflow ao ser empurrado 32 casas para a esquerda.
+            // O operador bitwise OR (|) junta as duas partes num único número de 64 bits.
+            uint64_t physical_block = (static_cast<uint64_t>(extent[i].ee_start_hi) << 32) | extent[i].ee_start_lo;
+            
+            // 6. Retornamos o bloco físico base + a diferença (offset) de onde o bloco lógico está dentro deste extent.
+            return physical_block + (logical_block - extent[i].ee_block);
+        }
+    }
+    
+    // Retorna 0 se o bloco procurado não existir
+    return 0;
+}
