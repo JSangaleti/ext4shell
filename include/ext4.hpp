@@ -4,6 +4,7 @@
 #include <fstream>
 #include <stdint.h>
 #include <string>
+#include <cstring>
 
 using namespace std;
 
@@ -100,6 +101,15 @@ struct ext4_extent {
     uint16_t ee_len;        // Quantidade de blocos contíguos armazenados em sequência
     uint16_t ee_start_hi;   // Parte alta (16 bits) do número do bloco físico real no disco
     uint32_t ee_start_lo;   // Parte baixa (32 bits) do número do bloco físico real no disco
+} __attribute__((packed));
+
+// --- Entrada de Diretório ---
+// Guarda o nome do arquivo e aponta para o Inode dele
+struct ext4_dir_entry_2 {
+    uint32_t inode;      // Número do Inode (0 significa que o arquivo foi deletado)
+    uint16_t rec_len;    // Tamanho total deste registro
+    uint8_t name_len;    // Tamanho do nome do arquivo
+    uint8_t file_type;   // Tipo: 1 = Arquivo, 2 = Diretório
 } __attribute__((packed));
 
 void read_superblock(fstream& iso_file, ext4_super_block& block_out, int pos);

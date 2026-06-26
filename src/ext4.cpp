@@ -51,6 +51,12 @@ void write_block(fstream& iso_file, uint32_t block_number, uint32_t block_size, 
 }
 
 void read_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, ext4_inode& inode_out) {
+    // 0. Limpa estado de erro anterior (importante caso operações anteriores tenham falhado)
+    iso_file.clear();
+    
+    // Zera a struct para evitar leitura de lixo da memória caso a leitura falhe
+    memset(&inode_out, 0, sizeof(ext4_inode));
+
     uint32_t block_size = 1024 << sb.s_log_block_size;
     
     // 1. Descobrir a qual grupo esse inode pertence e seu índice local
@@ -61,7 +67,10 @@ void read_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_nu
     // A BGD sempre fica no bloco imediatamente após o superbloco
     uint32_t bgd_block = sb.s_first_data_block + 1;
     
-    uint64_t bgd_offset = (static_cast<uint64_t>(bgd_block) * block_size) + (group_num * 32);
+    // Identifica se o descritor tem 64 bytes (flag 64-bit) ou o padrão de 32 bytes
+    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
+    
+    uint64_t bgd_offset = (static_cast<uint64_t>(bgd_block) * block_size) + (group_num * desc_size);
 
     ext4_group_desc bgd;
     iso_file.seekg(bgd_offset);

@@ -68,6 +68,14 @@ int start_shell(fstream& iso_file){
             continue;
         }
 
+        if (command == "ls") {
+            ls(iso_file, super_block, state);
+        }
+
+        if (command == "cd") {
+            cd(arg1, iso_file, super_block, state);
+        }
+
     }
     return 0;
 };

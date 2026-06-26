@@ -14,9 +14,9 @@ void cat(const string file);
 
 void attr(const string file_dir); 
 
-void cd(const string path, fs_state& state); 
+void cd(const string path, fstream& iso_file, const ext4_super_block& sb, fs_state& state); 
 
-void ls(); 
+void ls(fstream& iso_file, const ext4_super_block& sb, const fs_state& state);
 
 bool testi(const uint32_t inode_number); 
 
