@@ -5,8 +5,6 @@
 
 using namespace std;
 
-bool DEBUG_MODE = true;
-
 int main(int argc, char const *argv[])
 {
     if (argc == 2){

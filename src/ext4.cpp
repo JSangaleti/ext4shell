@@ -13,35 +13,6 @@ void read_block(std::fstream& iso_file, uint32_t block_number, uint32_t block_si
     iso_file.read(buffer, block_size);
 }
 
-void print_superblock(const ext4_super_block& sb) {
-    cout << "\n--- RAW DUMP: SUPERBLOCO ---" << endl;
-    cout << "s_inodes_count:      " << sb.s_inodes_count << endl;
-    cout << "s_blocks_count_lo:   " << sb.s_blocks_count_lo << endl;
-    cout << "s_r_blocks_count_lo: " << sb.s_r_blocks_count_lo << endl;
-    cout << "s_free_blocks_count: " << sb.s_free_blocks_count_lo << endl;
-    cout << "s_free_inodes_count: " << sb.s_free_inodes_count << endl;
-    cout << "s_first_data_block:  " << sb.s_first_data_block << endl;
-    cout << "s_log_block_size:    " << sb.s_log_block_size << endl;
-    cout << "----------------------------\n" << endl;
-}
-
-void print_block(fstream& iso_file, uint32_t block_number, uint32_t block_size) {
-    cout << "\n--- RAW DUMP: BLOCO " << block_number << " ---" << endl;
-    
-    char* buffer = new char[block_size];
-    read_block(iso_file, block_number, block_size, buffer);
-    
-    int limit = (block_size < 64) ? block_size : 64; // Mostra só os primeiros 64 bytes
-    
-    for(int i = 0; i < limit; i++) {
-        printf("%02X ", (unsigned char)buffer[i]);
-        if ((i + 1) % 16 == 0) cout << endl; // Quebra a linha a cada 16 bytes
-    }
-    cout << "\n----------------------------\n" << endl;
-    
-    delete[] buffer;
-}
-
 void write_block(fstream& iso_file, uint32_t block_number, uint32_t block_size, const char* buffer) {
     uint64_t offset = static_cast<uint64_t>(block_number) * block_size;
     
@@ -120,3 +91,59 @@ uint64_t get_physical_block(const ext4_inode& inode, uint32_t logical_block) {
     // Retorna 0 se o bloco procurado não existir
     return 0;
 }
+
+vector<FileEntry> search_filedir(fstream& iso_file, const ext4_super_block& sb, uint32_t dir_inode_num, const string& target_name) {
+    iso_file.clear(); // Garante que o stream esteja limpo para novas leituras
+    
+    vector<FileEntry> entries;
+    
+    // Obtém o Inode do diretório atual para acessar sua árvore de blocos
+    ext4_inode dir_inode;
+    read_inode(iso_file, sb, dir_inode_num, dir_inode);
+
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    
+    // Calcula quantos blocos lógicos esse diretório usa
+    uint32_t num_blocks = dir_inode.i_size_lo / block_size;
+    if (dir_inode.i_size_lo % block_size != 0) num_blocks++;
+
+    // Varre todos os blocos de dados do diretório
+    for (uint32_t logical_block = 0; logical_block < num_blocks; ++logical_block) {
+        // Traduz o bloco lógico para o endereço físico no disco usando a árvore de extents
+        uint64_t phys_block = get_physical_block(dir_inode, logical_block);
+        if (phys_block == 0) continue;
+
+        uint64_t offset = phys_block * block_size;
+        uint32_t bytes_read = 0;
+
+        // Varre os registros dentro do bloco
+        while (bytes_read < block_size) {
+            ext4_dir_entry_2 entry;
+            iso_file.seekg(offset + bytes_read);
+            iso_file.read(reinterpret_cast<char*>(&entry), sizeof(ext4_dir_entry_2));
+
+            // Se rec_len for 0, o bloco acabou ou está corrompido
+            if (entry.rec_len == 0) break;
+
+            // Inode 0 indica uma entrada que foi apagada (rm)
+            if (entry.inode != 0) {
+                // Lê o nome do arquivo, que fica logo após a struct
+                char name[256] = {0};
+                iso_file.read(name, entry.name_len);
+                string current_name(name);
+
+                // Se não buscou por nome específico, OU se o nome bater com a busca
+                if (target_name.empty() || current_name == target_name) {
+                    entries.push_back({entry.inode, entry.file_type, current_name});
+                    
+                    // Se achou o alvo específico, pode parar de ler o disco
+                    if (!target_name.empty()) return entries; 
+                }
+            }
+            // Pula para o próximo registro
+            bytes_read += entry.rec_len;
+        }
+    }
+    return entries;
+}
+

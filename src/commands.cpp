@@ -1,5 +1,7 @@
 #include "commands.hpp"
 
+// --- READ ---
+
 void info(const ext4_super_block& super_block, const fs_state& state){
     cout << "--- INFO DO SISTEMA DE ARQUIVOS ---" << endl;
     cout << "Tamanho do Bloco: " << state.block_size << " bytes" << endl;
@@ -20,7 +22,6 @@ void cat(const string file) { cout << "falta implementar" << endl; }
 void attr(const string file_dir) { cout << "falta implementar" << endl; }
 
 void cd(const string path, fstream& iso_file, const ext4_super_block& sb, fs_state& state) {
-    iso_file.clear(); // Garante que o stream esteja limpo para novas leituras
     
     // Atalho para voltar direto para a raiz (Inode 2 é o padrão do ext4 para '/')
     if (path == "/") {
@@ -34,125 +35,56 @@ void cd(const string path, fstream& iso_file, const ext4_super_block& sb, fs_sta
         return;
     }
 
-    // Lê os metadados do diretório atual para saber onde seus blocos de dados estão
-    ext4_inode dir_inode;
-    read_inode(iso_file, sb, state.current_inode, dir_inode);
+    auto entries = search_filedir(iso_file, sb, state.current_inode, path);
 
-    uint32_t block_size = 1024 << sb.s_log_block_size;
-    uint32_t num_blocks = dir_inode.i_size_lo / block_size;
-    if (dir_inode.i_size_lo % block_size != 0) { 
-        num_blocks++;
-    }
-
-    // Varre os blocos físicos do diretório atual para encontrar a entrada do diretório destino
-    for (uint32_t logical_block = 0; logical_block < num_blocks; ++logical_block) {
-        uint64_t phys_block = get_physical_block(dir_inode, logical_block);
-        if (phys_block == 0) continue;
-
-        uint64_t offset = phys_block * block_size;
-        uint32_t bytes_read = 0;
-
-        // O bloco de diretório é uma lista sequencial de structs 'ext4_dir_entry_2'.
-        // Iteramos sobre o bloco usando a variável 'bytes_read' até chegar ao seu fim.
-        while (bytes_read < block_size) {
-            ext4_dir_entry_2 entry;
-            iso_file.seekg(offset + bytes_read);
-            iso_file.read(reinterpret_cast<char*>(&entry), sizeof(ext4_dir_entry_2));
-
-            // Se o tamanho da entrada for 0, chegamos ao final do bloco
-            if (entry.rec_len == 0) break;
-
-            // Se o número do Inode for != 0, o registro contém um arquivo/diretório válido
-            if (entry.inode != 0) {
-                char name[256] = {0};
-                iso_file.read(name, entry.name_len); // O nome está logo após a struct no disco
-                
-                // Comparação do nome da entrada com o caminho solicitado
-                if (string(name) == path) {
-                    // Confirma se o destino é um diretório (tipo 2 = dir)
-                    if (entry.file_type == 2) {
-                        
-                        // 1. Lógica para atualizar a string do path
-                        if (path == "..") {
-                            // Ao subir de nível, removemos o último segmento do caminho
-                            if (state.path != "/") {
-                                size_t last_slash = state.path.find_last_of("/");
-                                if (last_slash == 0) state.path = "/";
-                                else state.path = state.path.substr(0, last_slash);
-                            }
-                        } else {
-                            // Ao entrar em uma pasta, concatenamos o nome ao caminho atual
-                            if (state.path == "/") state.path = "/" + path;
-                            else state.path = state.path + "/" + path;
-                        }
-
-                        // 2. Atualiza o Inode para o novo diretório
-                        state.current_inode = entry.inode;
-                        return; 
-                    } else {
-                        cout << "cd: " << path << ": Nao e um diretorio" << endl;
-                        return;
-                    }
-                }
-            }
-            
-            // Pula para o próximo registro
-            bytes_read += entry.rec_len;
-        }
+    if (entries.empty()) {
+        cout << "cd: " << path << ": Arquivo ou diretorio nao encontrado" << endl;
+        return;
     }
     
-    // Se percorreu todos os blocos e não achou a entrada, o diretório não existe
-    cout << "cd: " << path << ": Arquivo ou diretorio nao encontrado" << endl;
+    // Pega o primeiro (e único) resultado da busca para acessar os dados
+    auto entry = entries[0];
+                
+    // Confirma se o destino é um diretório (tipo 2 = dir)
+    if (entry.file_type == 2) {
+        
+        // 1. Lógica para atualizar a string do path
+        if (path == "..") {
+            // Ao subir de nível, removemos o último segmento do caminho
+            if (state.path != "/") {
+                size_t last_slash = state.path.find_last_of("/");
+                if (last_slash == 0) state.path = "/";
+                else state.path = state.path.substr(0, last_slash);
+            }
+        } else {
+            // Ao entrar em uma pasta, concatenamos o nome ao caminho atual
+            if (state.path == "/") state.path = "/" + path;
+            else state.path = state.path + "/" + path;
+        }
+
+        // 2. Atualiza o Inode para o novo diretório
+        state.current_inode = entry.inode;
+        return; 
+    } else {
+        cout << "cd: " << path << ": Nao e um diretorio" << endl;
+        return;
+    }
 }
 
 void ls(fstream& iso_file, const ext4_super_block& sb, const fs_state& state) {
-    iso_file.clear(); // Garante que o stream esteja limpo para novas leituras
 
-    // Obtém o Inode do diretório atual para acessar sua árvore de blocos
-    ext4_inode dir_inode;
-    read_inode(iso_file, sb, state.current_inode, dir_inode);
+   auto entries = search_filedir(iso_file, sb, state.current_inode);
+         
+   for (const auto& entry : entries) {
 
-    uint32_t block_size = 1024 << sb.s_log_block_size;
-    
-    // Calcula quantos blocos lógicos esse diretório usa
-    uint32_t num_blocks = dir_inode.i_size_lo / block_size;
-    if (dir_inode.i_size_lo % block_size != 0) num_blocks++;
-
-    // Varre todos os blocos de dados do diretório
-    for (uint32_t logical_block = 0; logical_block < num_blocks; ++logical_block) {
-        // Traduz o bloco lógico para o endereço físico no disco usando a árvore de extents
-        uint64_t phys_block = get_physical_block(dir_inode, logical_block);
-        if (phys_block == 0) continue;
-
-        uint64_t offset = phys_block * block_size;
-        uint32_t bytes_read = 0;
-
-        // Varre os registros dentro do bloco
-        while (bytes_read < block_size) {
-            ext4_dir_entry_2 entry;
-            iso_file.seekg(offset + bytes_read);
-            iso_file.read(reinterpret_cast<char*>(&entry), sizeof(ext4_dir_entry_2));
-
-            // Se rec_len for 0, o bloco acabou ou está corrompido
-            if (entry.rec_len == 0) break;
-
-            // Inode 0 indica uma entrada que foi apagada (rm)
-            if (entry.inode != 0) {
-                // Lê o nome do arquivo, que fica logo após a struct
-                char name[256] = {0};
-                iso_file.read(name, entry.name_len);
-                
-                // Formatação: Coloca uma barra '/' se for diretório
-                if (entry.file_type == 2) {
-                    cout << name << "/  ";
-                } else {
-                    cout << name << "  ";
-                }
-            }
-            // Pula para o próximo registro
-            bytes_read += entry.rec_len;
+        // Formatação: Coloca uma barra '/' se for diretório
+        if (entry.file_type == 2) {
+            cout << entry.name << "/  ";
+        } else {
+            cout << entry.name << "  ";
         }
     }
+
     cout << endl;
 }
 
@@ -167,6 +99,8 @@ bool testb(const uint64_t block_number) {
 
 void command_export(const string source_path, const string target_string) { cout << "falta implementar" << endl; }
 
+// --- WRITE ---
+
 void touch(const string file) { cout << "falta implementar" << endl; }
 
 void mkdir(const string dir) { cout << "falta implementar" << endl; }
@@ -176,6 +110,37 @@ void rm(const string file) { cout << "falta implementar" << endl; }
 void rmdir(const string dir) { cout << "falta implementar" << endl; }
 
 void rename(const string file, const string new_file_name) { cout << "falta implementar" << endl; }
+
+// --- DEBUG ---
+
+void print_superblock(const ext4_super_block& sb) {
+    cout << "\n--- RAW DUMP: SUPERBLOCO ---" << endl;
+    cout << "s_inodes_count:      " << sb.s_inodes_count << endl;
+    cout << "s_blocks_count_lo:   " << sb.s_blocks_count_lo << endl;
+    cout << "s_r_blocks_count_lo: " << sb.s_r_blocks_count_lo << endl;
+    cout << "s_free_blocks_count: " << sb.s_free_blocks_count_lo << endl;
+    cout << "s_free_inodes_count: " << sb.s_free_inodes_count << endl;
+    cout << "s_first_data_block:  " << sb.s_first_data_block << endl;
+    cout << "s_log_block_size:    " << sb.s_log_block_size << endl;
+    cout << "----------------------------\n" << endl;
+}
+
+void print_block(fstream& iso_file, uint32_t block_number, uint32_t block_size) {
+    cout << "\n--- RAW DUMP: BLOCO " << block_number << " ---" << endl;
+    
+    char* buffer = new char[block_size];
+    read_block(iso_file, block_number, block_size, buffer);
+    
+    int limit = (block_size < 64) ? block_size : 64; // Mostra só os primeiros 64 bytes
+    
+    for(int i = 0; i < limit; i++) {
+        printf("%02X ", (unsigned char)buffer[i]);
+        if ((i + 1) % 16 == 0) cout << endl; // Quebra a linha a cada 16 bytes
+    }
+    cout << "\n----------------------------\n" << endl;
+    
+    delete[] buffer;
+}
 
 void print_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num) {
     ext4_inode inode;

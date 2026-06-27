@@ -5,8 +5,15 @@
 #include <stdint.h>
 #include <string>
 #include <cstring>
+#include <vector>
 
 using namespace std;
+
+struct FileEntry {
+    uint32_t inode;
+    uint8_t file_type; // 1 = arquivo, 2 = diretório
+    string name;
+};
 
 // --- Super bloco ---
 // Guarda os dados do super bloco 
@@ -121,3 +128,5 @@ void write_block(fstream& iso_file, uint32_t block_number, uint32_t block_size, 
 void read_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, ext4_inode& inode_out);
 
 uint64_t get_physical_block(const ext4_inode& inode, uint32_t logical_block);
+
+vector<FileEntry> search_filedir(fstream& iso_file, const ext4_super_block& sb, uint32_t dir_inode_num, const string& target_name = "");
