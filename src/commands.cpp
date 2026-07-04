@@ -17,7 +17,49 @@ void pwd(const fs_state& state) {
     cout << state.path << endl;
 }
 
-void cat(const string file) { cout << "falta implementar" << endl; }
+void cat(const string path, fstream& iso_file, const ext4_super_block& sb, const fs_state& state) {
+    // Busca o arquivo no diretório atual
+    auto entries = search_filedir(iso_file, sb, state.current_inode, path);
+    if (entries.empty()) {
+        cout << "cat: " << path << ": Arquivo nao encontrado\n";
+        return;
+    }
+
+    auto entry = entries[0];
+    if (entry.file_type != 1) { // Garante que é um arquivo regular (1) e não diretório (2)
+        cout << "cat: " << path << ": E um diretorio\n";
+        return;
+    }
+
+    // Lê o Inode do arquivo para saber o tamanho exato
+    ext4_inode file_inode;
+    read_inode(iso_file, sb, entry.inode, file_inode);
+
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t remaining_bytes = file_inode.i_size_lo;
+    uint32_t logical_block = 0;
+
+    // Buffer para carregar os blocos de texto
+    vector<char> buffer(block_size);
+
+    // Lê bloco por bloco até acabar o tamanho do arquivo
+    while (remaining_bytes > 0) {
+        uint64_t phys_block = get_physical_block(file_inode, logical_block);
+        
+        // Lê apenas o que falta (evita imprimir lixo da memória no último bloco)
+        uint32_t bytes_to_read = (remaining_bytes < block_size) ? remaining_bytes : block_size;
+
+        if (phys_block != 0) {
+            iso_file.seekg(phys_block * block_size);
+            iso_file.read(buffer.data(), bytes_to_read);
+            cout.write(buffer.data(), bytes_to_read);
+        }
+
+        remaining_bytes -= bytes_to_read;
+        logical_block++;
+    }
+    cout << endl;
+}
 
 void attr(const string file_dir) { cout << "falta implementar" << endl; }
 
@@ -126,6 +168,7 @@ void print_superblock(const ext4_super_block& sb) {
 }
 
 void print_block(fstream& iso_file, uint32_t block_number, uint32_t block_size) {
+    iso_file.clear();
     cout << "\n--- RAW DUMP: BLOCO " << block_number << " ---" << endl;
     
     char* buffer = new char[block_size];
@@ -143,6 +186,7 @@ void print_block(fstream& iso_file, uint32_t block_number, uint32_t block_size) 
 }
 
 void print_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num) {
+    iso_file.clear();
     ext4_inode inode;
     read_inode(iso_file, sb, inode_num, inode);
     

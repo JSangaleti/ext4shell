@@ -10,7 +10,7 @@ using namespace std;
 // [READ]:
 void info(const ext4_super_block& super_block, const fs_state& state);
 
-void cat(const string file);
+void cat(const string path, fstream& iso_file, const ext4_super_block& sb, const fs_state& state);
 
 void attr(const string file_dir); 
 

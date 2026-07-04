@@ -10,6 +10,11 @@ int start_shell(fstream& iso_file){
     {
         read_superblock(iso_file, super_block, 1024);
 
+        if (super_block.s_magic != 0xEF53) {
+            cerr << "Erro fatal: O arquivo nao e uma imagem ext4 valida (Magic Number incorreto)." << endl;
+            return 1;
+        }
+
         state.block_size = 1024 << super_block.s_log_block_size;
     }
     catch(const std::exception& e) {
@@ -28,10 +33,32 @@ int start_shell(fstream& iso_file){
 
         // --- PARSER DE ARGUMENTOS ---
         string command, arg1, arg2;
+        // 1. Pega o comando
         stringstream ss(entry);
-        ss >> command;  // Pega o comando
-        ss >> arg1;     // Pega o primeiro argumento (se existir)
-        ss >> arg2;     // Pega o segundo argumento (se existir)
+        ss >> command;
+
+        // 2. Pega o restante da linha bruta
+        string rest;
+        getline(ss, rest);
+
+        // 3. Função para extrair argumentos respeitando aspas
+        auto get_args = [](string s) {
+            vector<string> args;
+            bool in_quotes = false;
+            string current;
+            for (char c : s) {
+                if (c == '"') in_quotes = !in_quotes;
+                else if (c == ' ' && !in_quotes) {
+                    if (!current.empty()) { args.push_back(current); current = ""; }
+                } else current += c;
+            }
+            if (!current.empty()) args.push_back(current);
+            return args;
+        };
+
+        vector<string> args = get_args(rest);
+        arg1 = (args.size() > 0) ? args[0] : "";
+        arg2 = (args.size() > 1) ? args[1] : "";
 
         if (command == "exit" || command == "quit") {
             break;
@@ -74,6 +101,10 @@ int start_shell(fstream& iso_file){
 
         if (command == "cd") {
             cd(arg1, iso_file, super_block, state);
+        }
+
+        if (command == "cat") {
+            cat(arg1, iso_file, super_block, state);
         }
 
     }

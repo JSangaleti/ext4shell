@@ -45,7 +45,10 @@ void read_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_nu
 
     ext4_group_desc bgd;
     iso_file.seekg(bgd_offset);
-    iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+    if (!iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc))) {
+        cerr << "\n[ERRO] Falha ao ler Tabela de Descritores no offset: " << bgd_offset << endl;
+        return;
+    }
 
     // 3. Achar o Inode dentro da tabela desse grupo
     uint64_t inode_table_offset = static_cast<uint64_t>(bgd.bg_inode_table_lo) * block_size;
@@ -55,7 +58,9 @@ void read_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_nu
 
     iso_file.seekg(exact_inode_offset);
 
-    iso_file.read(reinterpret_cast<char*>(&inode_out), sizeof(ext4_inode));
+    if (!iso_file.read(reinterpret_cast<char*>(&inode_out), sizeof(ext4_inode))) {
+        cerr << "\n[ERRO] Falha ao ler Inode " << inode_num << " no offset: " << exact_inode_offset << endl;
+    };
 }
 
 uint64_t get_physical_block(const ext4_inode& inode, uint32_t logical_block) {
