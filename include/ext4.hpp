@@ -130,3 +130,5 @@ void read_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_nu
 uint64_t get_physical_block(const ext4_inode& inode, uint32_t logical_block);
 
 vector<FileEntry> search_filedir(fstream& iso_file, const ext4_super_block& sb, uint32_t dir_inode_num, const string& target_name = "");
+
+bool check_bit(const char* bitmap, uint32_t bit_index);

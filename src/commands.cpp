@@ -156,16 +156,84 @@ void ls(fstream& iso_file, const ext4_super_block& sb, const fs_state& state) {
     cout << endl;
 }
 
-bool testi(const uint32_t inode_number) { 
-    cout << "falta implementar" << endl; 
-    return false;
-}
-bool testb(const uint64_t block_number) { 
-    cout << "falta implementar" << endl; 
-    return false;
+bool testi(uint32_t inode_number, fstream& iso_file, const ext4_super_block& sb) {
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t group_num = (inode_number - 1) / sb.s_inodes_per_group;
+    uint32_t local_idx = (inode_number - 1) % sb.s_inodes_per_group;
+
+    // Busca o descritor do grupo
+    ext4_group_desc bgd;
+    uint32_t bgd_block = sb.s_first_data_block + 1;
+    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
+    iso_file.seekg((uint64_t)bgd_block * block_size + (group_num * desc_size));
+    iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+
+    // Lê o bitmap de inodes
+    vector<char> bitmap(block_size);
+    iso_file.seekg((uint64_t)bgd.bg_inode_bitmap_lo * block_size);
+    iso_file.read(bitmap.data(), block_size);
+
+    return check_bit(bitmap.data(), local_idx);
 }
 
-void command_export(const string source_path, const string target_string) { cout << "falta implementar" << endl; }
+bool testb(uint64_t block_number, fstream& iso_file, const ext4_super_block& sb) {
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t group_num = block_number / sb.s_blocks_per_group;
+    uint32_t local_idx = block_number % sb.s_blocks_per_group;
+
+    ext4_group_desc bgd;
+    uint32_t bgd_block = sb.s_first_data_block + 1;
+    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
+    iso_file.seekg((uint64_t)bgd_block * block_size + (group_num * desc_size));
+    iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+
+    vector<char> bitmap(block_size);
+    iso_file.seekg((uint64_t)bgd.bg_block_bitmap_lo * block_size);
+    iso_file.read(bitmap.data(), block_size);
+
+    return check_bit(bitmap.data(), local_idx);
+}
+
+void command_export(const string source_path, const string target_path, fstream& iso_file, const ext4_super_block& sb, const fs_state& state) {
+    // 1. Busca o arquivo dentro da imagem
+    auto entries = search_filedir(iso_file, sb, state.current_inode, source_path);
+    if (entries.empty()) {
+        cout << "export: " << source_path << ": Arquivo nao encontrado" << endl;
+        return;
+    }
+
+    ext4_inode file_inode;
+    read_inode(iso_file, sb, entries[0].inode, file_inode);
+
+    // 2. Abre o arquivo de destino
+    ofstream target_file(target_path, ios::binary);
+    if (!target_file.is_open()) {
+        cout << "export: Erro ao criar arquivo de destino: " << target_path << endl;
+        return;
+    }
+
+    // 3. Lê bloco por bloco da imagem e escreve no arquivo real
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t remaining_bytes = file_inode.i_size_lo;
+    uint32_t logical_block = 0;
+    vector<char> buffer(block_size);
+
+    while (remaining_bytes > 0) {
+        uint64_t phys_block = get_physical_block(file_inode, logical_block);
+        uint32_t bytes_to_read = (remaining_bytes < block_size) ? remaining_bytes : block_size;
+
+        if (phys_block != 0) {
+            iso_file.seekg(phys_block * block_size);
+            iso_file.read(buffer.data(), bytes_to_read);
+            target_file.write(buffer.data(), bytes_to_read);
+        }
+
+        remaining_bytes -= bytes_to_read;
+        logical_block++;
+    }
+
+    cout << "Sucesso: Arquivo exportado para " << target_path << endl;
+}
 
 // --- WRITE ---
 

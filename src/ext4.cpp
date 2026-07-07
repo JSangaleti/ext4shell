@@ -152,3 +152,8 @@ vector<FileEntry> search_filedir(fstream& iso_file, const ext4_super_block& sb, 
     return entries;
 }
 
+bool check_bit(const char* bitmap, uint32_t bit_index) {
+    uint32_t byte_index = bit_index / 8;
+    uint32_t bit_offset = bit_index % 8;
+    return (bitmap[byte_index] & (1 << bit_offset)) != 0;
+}

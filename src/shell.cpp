@@ -76,16 +76,14 @@ int start_shell(fstream& iso_file){
 
         if (command == "print_block") {
             if (arg1.empty()) {
-                cout << "Erro: informe o bloco. Ex: print_block 0" << endl;
+                cout << "Erro: informe o bloco." << endl;
                 continue;
             }
-            
-            uint32_t num_bloco = stoi(arg1); 
-            print_block(iso_file, num_bloco, state.block_size);
+            print_block(iso_file, stoi(arg1), state.block_size);
             continue;
         }
 
-        if (command == "pwd"){
+        if (command == "pwd") {
             pwd(state);
             continue;
         }
@@ -101,21 +99,56 @@ int start_shell(fstream& iso_file){
             continue;
         }
 
+        if (command == "cd" || command == "cat" || command == "attr" || command == "testi" || command == "testb" || command == "touch" || command == "mkdir" || command == "rm" || command == "rmdir") {
+            if (arg1.empty()) {
+                cout << "Erro: o comando '" << command << "' precisa de um argumento." << endl;
+                continue;
+            }
+        }
+
         if (command == "cd") {
             cd(arg1, iso_file, super_block, state);
-            continue;
-        }
 
-        if (command == "cat") {
+        } else if (command == "cat") {
             cat(arg1, iso_file, super_block, state);
-            continue;
-        }
 
-        if (command == "attr") {
+        } else if (command == "attr") {
             attr(arg1, iso_file, super_block, state);
-            continue;
-        }
 
+        } else if (command == "testi") {
+            bool used = testi(stoi(arg1), iso_file, super_block);
+            cout << "Inode " << arg1 << " esta " << (used ? "OCUPADO" : "LIVRE") << endl;
+
+        } else if (command == "testb") {
+            bool used = testb(stoul(arg1), iso_file, super_block);
+            cout << "Bloco " << arg1 << " esta " << (used ? "OCUPADO" : "LIVRE") << endl;
+
+        } else if (command == "touch") {
+            touch(arg1);
+
+        } else if (command == "mkdir") {
+            mkdir(arg1);
+
+        } else if (command == "rm") {
+            rm(arg1);
+
+        } else if (command == "rmdir") {
+            rmdir(arg1);
+
+        } else if (command == "rename") {
+            if (arg1.empty() || arg2.empty()) {
+                cout << "Erro: rename precisa de dois argumentos." << endl;
+            } else {
+                rename(arg1, arg2);
+            }
+
+        } else if (command == "export") {
+            if (arg1.empty() || arg2.empty()) {
+                cout << "Erro: export precisa de dois argumentos." << endl;
+            } else {
+                command_export(arg1, arg2, iso_file, super_block, state);
+            }
+        }
     }
     return 0;
 };

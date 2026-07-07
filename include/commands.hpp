@@ -19,11 +19,11 @@ void cd(const string path, fstream& iso_file, const ext4_super_block& sb, fs_sta
 
 void ls(fstream& iso_file, const ext4_super_block& sb, const fs_state& state);
 
-bool testi(const uint32_t inode_number); 
+bool testi(const uint32_t inode_number, fstream& iso_file, const ext4_super_block& sb);
 
-bool testb(const uint64_t block_number); 
+bool testb(const uint64_t block_number, fstream& iso_file, const ext4_super_block& sb);
 
-void command_export(const string source_path, const string target_string); 
+void command_export(const string source_path, const string target_string, fstream& iso_file, const ext4_super_block& sb, const fs_state& state);
 
 void pwd(const fs_state& state);
 
