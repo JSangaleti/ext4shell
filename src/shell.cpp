@@ -87,6 +87,7 @@ int start_shell(fstream& iso_file){
 
         if (command == "pwd"){
             pwd(state);
+            continue;
         }
 
         if (command == "print_inode") {
@@ -97,14 +98,22 @@ int start_shell(fstream& iso_file){
 
         if (command == "ls") {
             ls(iso_file, super_block, state);
+            continue;
         }
 
         if (command == "cd") {
             cd(arg1, iso_file, super_block, state);
+            continue;
         }
 
         if (command == "cat") {
             cat(arg1, iso_file, super_block, state);
+            continue;
+        }
+
+        if (command == "attr") {
+            attr(arg1, iso_file, super_block, state);
+            continue;
         }
 
     }

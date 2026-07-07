@@ -61,7 +61,33 @@ void cat(const string path, fstream& iso_file, const ext4_super_block& sb, const
     cout << endl;
 }
 
-void attr(const string file_dir) { cout << "falta implementar" << endl; }
+void attr(const string path, fstream& iso_file, const ext4_super_block& sb, const fs_state& state) {
+    // 1. Busca o arquivo
+    auto entries = search_filedir(iso_file, sb, state.current_inode, path);
+    if (entries.empty()) {
+        cout << "attr: " << path << ": Arquivo ou diretorio nao encontrado" << endl;
+        return;
+    }
+
+    // 2. Lê o Inode
+    ext4_inode inode;
+    read_inode(iso_file, sb, entries[0].inode, inode);
+
+    // 3. Exibe os atributos
+    cout << "--- ATRIBUTOS DE: " << path << " ---" << endl;
+    cout << "Inode:      " << entries[0].inode << endl;
+    cout << "Tamanho:    " << inode.i_size_lo << " bytes" << endl;
+    cout << "Modo:       0" << oct << inode.i_mode << dec << endl; // Exibe em octal
+    cout << "UID:        " << inode.i_uid << endl;
+    cout << "GID:        " << inode.i_gid << endl;
+    cout << "Links:      " << inode.i_links_count << endl;
+    
+    // Converte os tempos
+    time_t mtime = inode.i_mtime;
+    cout << "Modificado: " << ctime(&mtime);
+    
+    cout << "-------------------------------" << endl;
+}
 
 void cd(const string path, fstream& iso_file, const ext4_super_block& sb, fs_state& state) {
     

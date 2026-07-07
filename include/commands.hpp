@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <ctime>
 
 #include "ext4.hpp"
 #include "shell.hpp"
@@ -12,7 +13,7 @@ void info(const ext4_super_block& super_block, const fs_state& state);
 
 void cat(const string path, fstream& iso_file, const ext4_super_block& sb, const fs_state& state);
 
-void attr(const string file_dir); 
+void attr(const string path, fstream& iso_file, const ext4_super_block& sb, const fs_state& state); 
 
 void cd(const string path, fstream& iso_file, const ext4_super_block& sb, fs_state& state); 
 
