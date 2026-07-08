@@ -8,6 +8,10 @@ static bool parse_uint64_arg(const string& text, uint64_t& value) {
         return false;
     }
 
+    if (text[0] == '+' || text[0] == '-') {
+        return false;
+    }
+
     try {
         size_t parsed_chars = 0;
         unsigned long long parsed_value = stoull(text, &parsed_chars, 10);
@@ -119,6 +123,10 @@ int start_shell(fstream& iso_file){
                 cout << "Erro: bloco invalido." << endl;
                 continue;
             }
+            if (block_number >= super_block.s_blocks_count_lo) {
+                cout << "Erro: bloco fora da imagem." << endl;
+                continue;
+            }
             print_block(iso_file, block_number, state.block_size);
             continue;
         }
@@ -132,6 +140,10 @@ int start_shell(fstream& iso_file){
             uint32_t num = 2;
             if (!arg1.empty() && !parse_uint32_arg(arg1, num)) {
                 cout << "Erro: inode invalido." << endl;
+                continue;
+            }
+            if (num == 0 || num > super_block.s_inodes_count) {
+                cout << "Erro: inode fora da imagem." << endl;
                 continue;
             }
             print_inode(iso_file, super_block, num);
@@ -165,6 +177,10 @@ int start_shell(fstream& iso_file){
                 cout << "Erro: inode invalido." << endl;
                 continue;
             }
+            if (inode_number == 0 || inode_number > super_block.s_inodes_count) {
+                cout << "Erro: inode fora da imagem." << endl;
+                continue;
+            }
             bool used = testi(inode_number, iso_file, super_block);
             cout << "Inode " << arg1 << " esta " << (used ? "OCUPADO" : "LIVRE") << endl;
 
@@ -172,6 +188,10 @@ int start_shell(fstream& iso_file){
             uint64_t block_number = 0;
             if (!parse_uint64_arg(arg1, block_number)) {
                 cout << "Erro: bloco invalido." << endl;
+                continue;
+            }
+            if (block_number >= super_block.s_blocks_count_lo) {
+                cout << "Erro: bloco fora da imagem." << endl;
                 continue;
             }
             bool used = testb(block_number, iso_file, super_block);

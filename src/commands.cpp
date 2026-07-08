@@ -14,6 +14,10 @@ static uint32_t count_logical_blocks(uint64_t file_size, uint32_t block_size) {
     return (file_size + block_size - 1) / block_size;
 }
 
+static bool is_valid_entry_name(const string& name) {
+    return !name.empty() && name.size() <= 255 && name.find('/') == string::npos;
+}
+
 // --- READ ---
 
 void info(const ext4_super_block& super_block, const fs_state& state){
@@ -216,6 +220,11 @@ void command_export(const string source_path, const string target_path, fstream&
         return;
     }
 
+    if (entries[0].file_type != 1) {
+        cout << "export: " << source_path << ": Nao e um arquivo regular" << endl;
+        return;
+    }
+
     ext4_inode file_inode;
     read_inode(iso_file, sb, entries[0].inode, file_inode);
 
@@ -252,6 +261,11 @@ void command_export(const string source_path, const string target_path, fstream&
 // --- WRITE ---
 
 void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    if (!is_valid_entry_name(file)) {
+        cout << "touch: Nome invalido." << endl;
+        return;
+    }
+
     // 0. Verifica se o arquivo já existe no diretório atual
     auto existing = search_filedir(iso_file, sb, state.current_inode, file);
     if (!existing.empty()) {
@@ -296,6 +310,11 @@ void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state&
 }
 
 void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    if (!is_valid_entry_name(dir)) {
+        cout << "mkdir: Nome invalido." << endl;
+        return;
+    }
+
     // 0. Verifica se o nome já existe
     auto existing = search_filedir(iso_file, sb, state.current_inode, dir);
     if (!existing.empty()) {
@@ -481,6 +500,11 @@ void rmdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
 void rename(const string file, const string new_file_name, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
     if (file == "." || file == "..") {
         cout << "rename: Impossivel renomear atalhos de sistema." << endl;
+        return;
+    }
+
+    if (!is_valid_entry_name(new_file_name)) {
+        cout << "rename: Nome novo invalido." << endl;
         return;
     }
 
