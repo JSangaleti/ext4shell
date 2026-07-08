@@ -18,6 +18,42 @@ static bool is_valid_entry_name(const string& name) {
     return !name.empty() && name.size() <= 255 && name.find('/') == string::npos;
 }
 
+// -- HELP ---
+void help() {
+
+    cout << "===============================================================" << endl;
+    cout << "                 COMANDOS DISPONIVEIS - EXT4SHELL              " << endl;
+    cout << "===============================================================" << endl;
+    
+    cout << "\n[ Navegacao e Informacao ]" << endl;
+    cout << "  info                - Exibe informacoes do superbloco do disco" << endl;
+    cout << "  pwd                 - Imprime o caminho do diretorio atual" << endl;
+    cout << "  cd <dir>            - Entra no diretorio especificado" << endl;
+    cout << "  ls                  - Lista o conteudo do diretorio atual" << endl;
+    cout << "  attr <nome>         - Exibe os metadados (tamanho, tipo) de um arquivo" << endl;
+    
+    cout << "\n[ Manipulacao de Arquivos e Diretorios ]" << endl;
+    cout << "  touch <arquivo>     - Cria um novo arquivo regular vazio" << endl;
+    cout << "  mkdir <dir>         - Cria um novo diretorio" << endl;
+    cout << "  rm <arquivo>        - Remove um arquivo (liberando blocos e inode)" << endl;
+    cout << "  rmdir <dir>         - Remove um diretorio (se estiver vazio)" << endl;
+    cout << "  rename <old> <new>  - Renomeia arquivo/diretorio" << endl;
+    cout << "  cat <arquivo>       - Exibe o texto de um arquivo na tela" << endl;
+    cout << "  export <ext4> <os>  - Copia um arquivo do ext4 para o seu sistema real" << endl;
+    
+    cout << "\n[ Debug ]" << endl;
+    cout << "  print_inode <num>   - Inspeciona a estrutura raw de um Inode especifico" << endl;
+    cout << "  print_block <num>   - Exibe o hexdump do conteudo fisico de um bloco" << endl;
+    cout << "  print_superblock    - Exibe informações sobre o superbloco" << endl;
+    cout << "  testi <num>         - Verifica no Bitmap de Inodes se <num> esta em uso" << endl;
+    cout << "  testb <num>         - Verifica no Bitmap de Blocos se <num> esta em uso" << endl;
+    
+    cout << "\n[ Sistema ]" << endl;
+    cout << "  help                - Exibe este manual de comandos" << endl;
+    cout << "  exit ou quit        - encerra o shell" << endl;
+    cout << "===============================================================" << endl;
+}
+
 // --- READ ---
 
 void info(const ext4_super_block& super_block, const fs_state& state){

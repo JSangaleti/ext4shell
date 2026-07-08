@@ -54,6 +54,11 @@ int start_shell(fstream& iso_file){
             return 1;
         }
 
+        if (!(super_block.s_feature_incompat & EXT4_FEATURE_INCOMPAT_EXTENTS)) {
+            cerr << "Erro fatal: A imagem ext4 nao possui suporte a Extents (Feature flag 0x40 ausente)." << endl;
+            return 1;
+        }
+
         state.block_size = 1024 << super_block.s_log_block_size;
     }
     catch(const std::exception& e) {
@@ -101,6 +106,11 @@ int start_shell(fstream& iso_file){
 
         if (command == "exit" || command == "quit") {
             break;
+        }
+
+        if (command == "help") {
+            help();
+            continue;
         }
 
         if (command == "info") {

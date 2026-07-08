@@ -1,23 +1,7 @@
 #include "ext4.hpp"
 #include "ext4checksum.h"
 
-static constexpr uint32_t EXT4_FEATURE_RO_COMPAT_METADATA_CSUM = 0x0400;
-static constexpr uint32_t EXT4_SUPERBLOCK_OFFSET = 1024;
-static constexpr uint32_t EXT4_SUPERBLOCK_UUID_OFFSET = 104;
-static constexpr uint16_t EXT4_DIR_ENTRY_TAIL_REC_LEN = 12;
-static constexpr uint8_t EXT4_FT_DIR_CSUM = 0xDE;
-static constexpr uint32_t EXT4_FEATURE_INCOMPAT_64BIT = 0x0080;
-static constexpr uint32_t EXT4_GROUP_DESC_SIZE_64BIT = 64;
-static constexpr uint32_t EXT4_GROUP_DESC_SIZE_LEGACY = 32;
-static constexpr uint32_t EXT4_GD_BLOCK_BITMAP_CSUM_LO_OFFSET = 0x18;
-static constexpr uint32_t EXT4_GD_INODE_BITMAP_CSUM_LO_OFFSET = 0x1A;
-static constexpr uint32_t EXT4_GD_ITABLE_UNUSED_LO_OFFSET = 0x1C;
-static constexpr uint32_t EXT4_GD_CHECKSUM_OFFSET = 0x1E;
-static constexpr uint32_t EXT4_GD_BLOCK_BITMAP_CSUM_HI_OFFSET = 0x38;
-static constexpr uint32_t EXT4_GD_INODE_BITMAP_CSUM_HI_OFFSET = 0x3A;
-static constexpr uint32_t EXT4_INODE_CSUM_LO_OFFSET = 0x7C;
-static constexpr uint32_t EXT4_INODE_EXTRA_ISIZE_OFFSET = 0x80;
-static constexpr uint32_t EXT4_INODE_CSUM_HI_OFFSET = 0x82;
+
 
 static bool read_superblock_uuid(fstream& iso_file, char uuid[16]) {
     iso_file.clear();
