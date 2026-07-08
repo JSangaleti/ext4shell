@@ -346,3 +346,120 @@ uint64_t allocate_block(fstream& iso_file, ext4_super_block& sb) {
     }
     return 0; // Sem espaço
 }
+
+void free_inode(fstream& iso_file, ext4_super_block& sb, uint32_t inode_num) {
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t group_num = (inode_num - 1) / sb.s_inodes_per_group;
+    uint32_t local_idx = (inode_num - 1) % sb.s_inodes_per_group;
+
+    ext4_group_desc bgd;
+    uint32_t bgd_block = sb.s_first_data_block + 1;
+    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
+    
+    iso_file.seekg((uint64_t)bgd_block * block_size + (group_num * desc_size));
+    iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+
+    vector<char> bitmap(block_size);
+    iso_file.seekg((uint64_t)bgd.bg_inode_bitmap_lo * block_size);
+    iso_file.read(bitmap.data(), block_size);
+
+    // Zera o bit (marca como livre)
+    bitmap[local_idx / 8] &= ~(1 << (local_idx % 8));
+
+    iso_file.seekp((uint64_t)bgd.bg_inode_bitmap_lo * block_size);
+    iso_file.write(bitmap.data(), block_size);
+
+    bgd.bg_free_inodes_count_lo++;
+    iso_file.seekp((uint64_t)bgd_block * block_size + (group_num * desc_size));
+    iso_file.write(reinterpret_cast<const char*>(&bgd), sizeof(ext4_group_desc));
+
+    sb.s_free_inodes_count++;
+    iso_file.seekp(1024);
+    iso_file.write(reinterpret_cast<const char*>(&sb), sizeof(ext4_super_block));
+}
+
+bool remove_dir_entry(fstream& iso_file, const ext4_super_block& sb, uint32_t parent_inode_num, const string& name) {
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    ext4_inode parent_inode;
+    read_inode(iso_file, sb, parent_inode_num, parent_inode);
+
+    uint32_t logical_block = 0;
+    uint32_t remaining_bytes = parent_inode.i_size_lo;
+    vector<char> buffer(block_size);
+
+    while (remaining_bytes > 0) {
+        uint64_t phys_block = get_physical_block(parent_inode, logical_block);
+        if (phys_block == 0) break;
+
+        iso_file.seekg(phys_block * block_size);
+        iso_file.read(buffer.data(), block_size);
+
+        uint32_t offset = 0;
+        ext4_dir_entry_2* prev_entry = nullptr;
+
+        while (offset < block_size) {
+            ext4_dir_entry_2* entry = reinterpret_cast<ext4_dir_entry_2*>(buffer.data() + offset);
+            if (entry->rec_len == 0) break;
+
+            // Se encontrou o arquivo
+            if (entry->inode != 0 && entry->name_len == name.length() && strncmp(entry->name, name.c_str(), name.length()) == 0) {
+                if (prev_entry != nullptr) {
+                    // Apaga o registro atual somando o tamanho no anterior
+                    prev_entry->rec_len += entry->rec_len;
+                } else {
+                    // Se for o primeiro do bloco, apaga logicamente
+                    entry->inode = 0; 
+                }
+
+                iso_file.seekp(phys_block * block_size);
+                iso_file.write(buffer.data(), block_size);
+                return true;
+            }
+            prev_entry = entry;
+            offset += entry->rec_len;
+        }
+        uint32_t bytes_to_read = (remaining_bytes < block_size) ? remaining_bytes : block_size;
+        remaining_bytes -= bytes_to_read;
+        logical_block++;
+    }
+    return false;
+}
+
+bool is_dir_empty(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num) {
+    // Busca todas as entradas do diretório
+    auto entries = search_filedir(iso_file, sb, inode_num);
+    
+    // Se tiver apenas 2 (ou menos, em caso de raiz corrompida), é apenas o '.' e '..'
+    return entries.size() <= 2;
+}
+
+void free_block(fstream& iso_file, ext4_super_block& sb, uint64_t block_num) {
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t group_num = (block_num - sb.s_first_data_block) / sb.s_blocks_per_group;
+    uint32_t local_idx = (block_num - sb.s_first_data_block) % sb.s_blocks_per_group;
+
+    ext4_group_desc bgd;
+    uint32_t bgd_block = sb.s_first_data_block + 1;
+    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
+
+    iso_file.seekg((uint64_t)bgd_block * block_size + (group_num * desc_size));
+    iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+
+    vector<char> bitmap(block_size);
+    iso_file.seekg((uint64_t)bgd.bg_block_bitmap_lo * block_size);
+    iso_file.read(bitmap.data(), block_size);
+
+    // Zera o bit correspondente ao bloco
+    bitmap[local_idx / 8] &= ~(1 << (local_idx % 8));
+
+    iso_file.seekp((uint64_t)bgd.bg_block_bitmap_lo * block_size);
+    iso_file.write(bitmap.data(), block_size);
+
+    bgd.bg_free_blocks_count_lo++;
+    iso_file.seekp((uint64_t)bgd_block * block_size + (group_num * desc_size));
+    iso_file.write(reinterpret_cast<const char*>(&bgd), sizeof(ext4_group_desc));
+
+    sb.s_free_blocks_count_lo++;
+    iso_file.seekp(1024);
+    iso_file.write(reinterpret_cast<const char*>(&sb), sizeof(ext4_super_block));
+}

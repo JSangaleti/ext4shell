@@ -145,3 +145,11 @@ uint32_t get_dir_rec_len(uint32_t name_length);
 bool add_dir_entry(fstream& iso_file, const ext4_super_block& sb, uint32_t parent_inode_num, uint32_t target_inode, const string& name, uint8_t file_type);
 
 uint64_t allocate_block(fstream& iso_file, ext4_super_block& sb);
+
+void free_inode(fstream& iso_file, ext4_super_block& sb, uint32_t inode_num);
+
+bool remove_dir_entry(fstream& iso_file, const ext4_super_block& sb, uint32_t parent_inode_num, const string& name);
+
+bool is_dir_empty(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num);
+
+void free_block(fstream& iso_file, ext4_super_block& sb, uint64_t block_num);

@@ -33,9 +33,9 @@ void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state&
 
 void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& state);
 
-void rm(const string file); 
+void rm(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& state); 
 
-void rmdir(const string dir); 
+void rmdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& state);
 
 void rename(const string file, const string new_file_name); 
 

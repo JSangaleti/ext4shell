@@ -130,10 +130,10 @@ int start_shell(fstream& iso_file){
             mkdir(arg1, iso_file, super_block, state);
 
         } else if (command == "rm") {
-            rm(arg1);
+            rm(arg1, iso_file, super_block, state);
 
         } else if (command == "rmdir") {
-            rmdir(arg1);
+            rmdir(arg1, iso_file, super_block, state);
 
         } else if (command == "rename") {
             if (arg1.empty() || arg2.empty()) {

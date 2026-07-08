@@ -362,9 +362,81 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
     }
 }
 
-void rm(const string file) { cout << "falta implementar" << endl; }
+void rm(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    auto entries = search_filedir(iso_file, sb, state.current_inode, file);
+    if (entries.empty()) {
+        cout << "rm: Impossivel remover '" << file << "': Arquivo nao encontrado" << endl;
+        return;
+    }
 
-void rmdir(const string dir) { cout << "falta implementar" << endl; }
+    if (entries[0].file_type == 2) {
+        cout << "rm: Impossivel remover '" << file << "': E um diretorio" << endl;
+        return;
+    }
+
+    // Libera o inode
+    free_inode(iso_file, sb, entries[0].inode);
+
+    // Remove do diretório pai
+    if (remove_dir_entry(iso_file, sb, state.current_inode, file)) {
+        cout << "Arquivo removido: " << file << endl;
+    }
+}
+
+void rmdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    // Proíbe tentar apagar atalhos de navegação
+    if (dir == "." || dir == "..") {
+        cout << "rmdir: Impossivel remover '" << dir << "': Argumento invalido" << endl;
+        return;
+    }
+
+    auto entries = search_filedir(iso_file, sb, state.current_inode, dir);
+    if (entries.empty()) {
+        cout << "rmdir: Impossivel remover '" << dir << "': Arquivo ou diretorio nao encontrado" << endl;
+        return;
+    }
+
+    if (entries[0].file_type != 2) {
+        cout << "rmdir: Impossivel remover '" << dir << "': Nao e um diretorio" << endl;
+        return;
+    }
+
+    uint32_t target_inode_num = entries[0].inode;
+
+    // Só remove se o diretório estiver vazio
+    if (!is_dir_empty(iso_file, sb, target_inode_num)) {
+        cout << "rmdir: Impossivel remover '" << dir << "': O diretorio nao esta vazio" << endl;
+        return;
+    }
+
+    // 1. Encontra e libera todos os blocos de dados ocupados pelo diretório
+    ext4_inode target_inode;
+    read_inode(iso_file, sb, target_inode_num, target_inode);
+    uint32_t logical_block = 0;
+    while (true) {
+        uint64_t phys_block = get_physical_block(target_inode, logical_block);
+        if (phys_block == 0) break; // Acabaram os blocos
+        free_block(iso_file, sb, phys_block);
+        logical_block++;
+    }
+
+    // 2. Libera o Inode do diretório
+    free_inode(iso_file, sb, target_inode_num);
+
+    // 3. Remove a entrada do diretório pai
+    if (remove_dir_entry(iso_file, sb, state.current_inode, dir)) {
+        
+        // 4. Subtrai o link count do pai (pois o diretório filho continha um '..' apontando pra cá)
+        ext4_inode parent_inode;
+        read_inode(iso_file, sb, state.current_inode, parent_inode);
+        if (parent_inode.i_links_count > 0) {
+            parent_inode.i_links_count--;
+        }
+        write_inode(iso_file, sb, state.current_inode, parent_inode);
+
+        cout << "Diretorio removido: " << dir << endl;
+    }
+}
 
 void rename(const string file, const string new_file_name) { cout << "falta implementar" << endl; }
 
