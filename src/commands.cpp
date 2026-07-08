@@ -2,6 +2,18 @@
 
 static constexpr uint32_t EXT4_EXTENTS_FL = 0x00080000;
 
+static uint64_t inode_size_bytes(const ext4_inode& inode) {
+    return (static_cast<uint64_t>(inode.i_size_high) << 32) | inode.i_size_lo;
+}
+
+static uint32_t count_logical_blocks(uint64_t file_size, uint32_t block_size) {
+    if (file_size == 0) {
+        return 0;
+    }
+
+    return (file_size + block_size - 1) / block_size;
+}
+
 // --- READ ---
 
 void info(const ext4_super_block& super_block, const fs_state& state){
@@ -388,7 +400,20 @@ void rm(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& st
         return;
     }
 
-    // Libera o inode
+    ext4_inode target_inode;
+    read_inode(iso_file, sb, entries[0].inode, target_inode);
+
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t logical_blocks = count_logical_blocks(inode_size_bytes(target_inode), block_size);
+
+    for (uint32_t logical_block = 0; logical_block < logical_blocks; logical_block++) {
+        uint64_t physical_block = get_physical_block(target_inode, logical_block);
+        if (physical_block != 0) {
+            free_block(iso_file, sb, physical_block);
+        }
+    }
+
+    // Libera o inode depois dos blocos de dados para nao perder a referencia aos extents.
     free_inode(iso_file, sb, entries[0].inode);
 
     // Remove do diretório pai
