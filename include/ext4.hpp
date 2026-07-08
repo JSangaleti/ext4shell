@@ -136,9 +136,15 @@ bool check_bit(const char* bitmap, uint32_t bit_index);
 
 void set_bit(char* bitmap, uint32_t bit_index);
 
+bool ext4_has_metadata_csum(const ext4_super_block& sb);
+
 uint32_t allocate_inode(fstream& iso_file, ext4_super_block& sb);
 
 void write_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, const ext4_inode& inode);
+
+void update_dir_block_checksum(fstream& iso_file, const ext4_super_block& sb, uint32_t dir_inode_num, const ext4_inode& dir_inode, char* dir_block, uint32_t block_size);
+
+void update_group_used_dirs_count(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, int delta);
 
 uint32_t get_dir_rec_len(uint32_t name_length);
 

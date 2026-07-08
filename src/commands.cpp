@@ -1,5 +1,7 @@
 #include "commands.hpp"
 
+static constexpr uint32_t EXT4_EXTENTS_FL = 0x00080000;
+
 // --- READ ---
 
 void info(const ext4_super_block& super_block, const fs_state& state){
@@ -257,11 +259,17 @@ void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state&
     new_inode.i_mode = 0x81A4; // 0x8000 (Arquivo Regular) + 0644 (Permissões rw-r--r--)
     new_inode.i_size_lo = 0;
     new_inode.i_links_count = 1;
+    new_inode.i_flags = EXT4_EXTENTS_FL;
     new_inode.i_ctime = new_inode.i_atime = new_inode.i_mtime = time(nullptr);
     
-    // Header mínimo de Extents
-    new_inode.i_block[0] = 0x0A;
-    new_inode.i_block[1] = 0xF3;
+    // Arquivo vazio: possui cabecalho de extents valido, mas sem extents alocados.
+    ext4_extent_header eh{};
+    eh.eh_magic = 0xF30A;
+    eh.eh_entries = 0;
+    eh.eh_max = 4;
+    eh.eh_depth = 0;
+    eh.eh_generation = 0;
+    memcpy(new_inode.i_block, &eh, sizeof(eh));
 
     // 3. Escreve o Inode no disco
     write_inode(iso_file, sb, new_inode_num, new_inode);
@@ -300,6 +308,7 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
     new_inode.i_size_lo = block_size; // Um diretório começa ocupando 1 bloco
     new_inode.i_links_count = 2; // '.' e a si mesmo
     new_inode.i_blocks_lo = block_size / 512; // Número de setores (blocos de 512b)
+    new_inode.i_flags = EXT4_EXTENTS_FL;
     new_inode.i_ctime = new_inode.i_atime = new_inode.i_mtime = time(nullptr);
     
     // Criamos as structs locais e depois copiamos para o array i_block
@@ -326,6 +335,7 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
 
     // 3. Inicializa o novo bloco com '.' e '..'
     vector<char> dir_buffer(block_size, 0);
+    uint32_t dir_tail_size = ext4_has_metadata_csum(sb) ? 12 : 0;
     
     // Entrada '.'
     ext4_dir_entry_2* dot = reinterpret_cast<ext4_dir_entry_2*>(dir_buffer.data());
@@ -338,10 +348,12 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
     // Entrada '..' (usa todo o resto do bloco)
     ext4_dir_entry_2* dotdot = reinterpret_cast<ext4_dir_entry_2*>(dir_buffer.data() + dot->rec_len);
     dotdot->inode = state.current_inode;
-    dotdot->rec_len = block_size - dot->rec_len;
+    dotdot->rec_len = block_size - dot->rec_len - dir_tail_size;
     dotdot->name_len = 2;
     dotdot->file_type = 2;
     dotdot->name[0] = '.'; dotdot->name[1] = '.';
+
+    update_dir_block_checksum(iso_file, sb, new_inode_num, new_inode, dir_buffer.data(), block_size);
 
     // Grava o bloco do novo diretório no disco
     iso_file.seekp(new_block_num * block_size);
@@ -352,6 +364,8 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
     bool success = add_dir_entry(iso_file, sb, state.current_inode, new_inode_num, dir, 2); // 2 = Directory
     
     if (success) {
+        update_group_used_dirs_count(iso_file, sb, new_inode_num, 1);
+
         // Incrementa o contador de links do diretório pai (por causa do '..')
         ext4_inode parent_inode;
         read_inode(iso_file, sb, state.current_inode, parent_inode);
@@ -422,6 +436,7 @@ void rmdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
 
     // 2. Libera o Inode do diretório
     free_inode(iso_file, sb, target_inode_num);
+    update_group_used_dirs_count(iso_file, sb, target_inode_num, -1);
 
     // 3. Remove a entrada do diretório pai
     if (remove_dir_entry(iso_file, sb, state.current_inode, dir)) {
