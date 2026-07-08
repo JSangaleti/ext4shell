@@ -1,6 +1,41 @@
 #include "commands.hpp"
 #include "shell.hpp"
 
+#include <limits>
+
+static bool parse_uint64_arg(const string& text, uint64_t& value) {
+    if (text.empty()) {
+        return false;
+    }
+
+    try {
+        size_t parsed_chars = 0;
+        unsigned long long parsed_value = stoull(text, &parsed_chars, 10);
+        if (parsed_chars != text.size()) {
+            return false;
+        }
+
+        value = static_cast<uint64_t>(parsed_value);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+static bool parse_uint32_arg(const string& text, uint32_t& value) {
+    uint64_t parsed_value = 0;
+    if (!parse_uint64_arg(text, parsed_value)) {
+        return false;
+    }
+
+    if (parsed_value > numeric_limits<uint32_t>::max()) {
+        return false;
+    }
+
+    value = static_cast<uint32_t>(parsed_value);
+    return true;
+}
+
 int start_shell(fstream& iso_file){
     
     fs_state state;
@@ -79,7 +114,12 @@ int start_shell(fstream& iso_file){
                 cout << "Erro: informe o bloco." << endl;
                 continue;
             }
-            print_block(iso_file, stoi(arg1), state.block_size);
+            uint32_t block_number = 0;
+            if (!parse_uint32_arg(arg1, block_number)) {
+                cout << "Erro: bloco invalido." << endl;
+                continue;
+            }
+            print_block(iso_file, block_number, state.block_size);
             continue;
         }
 
@@ -89,7 +129,11 @@ int start_shell(fstream& iso_file){
         }
 
         if (command == "print_inode") {
-            uint32_t num = arg1.empty() ? 2 : stoi(arg1);
+            uint32_t num = 2;
+            if (!arg1.empty() && !parse_uint32_arg(arg1, num)) {
+                cout << "Erro: inode invalido." << endl;
+                continue;
+            }
             print_inode(iso_file, super_block, num);
             continue;
         }
@@ -116,11 +160,21 @@ int start_shell(fstream& iso_file){
             attr(arg1, iso_file, super_block, state);
 
         } else if (command == "testi") {
-            bool used = testi(stoi(arg1), iso_file, super_block);
+            uint32_t inode_number = 0;
+            if (!parse_uint32_arg(arg1, inode_number)) {
+                cout << "Erro: inode invalido." << endl;
+                continue;
+            }
+            bool used = testi(inode_number, iso_file, super_block);
             cout << "Inode " << arg1 << " esta " << (used ? "OCUPADO" : "LIVRE") << endl;
 
         } else if (command == "testb") {
-            bool used = testb(stoul(arg1), iso_file, super_block);
+            uint64_t block_number = 0;
+            if (!parse_uint64_arg(arg1, block_number)) {
+                cout << "Erro: bloco invalido." << endl;
+                continue;
+            }
+            bool used = testb(block_number, iso_file, super_block);
             cout << "Bloco " << arg1 << " esta " << (used ? "OCUPADO" : "LIVRE") << endl;
 
         } else if (command == "touch") {
@@ -148,6 +202,8 @@ int start_shell(fstream& iso_file){
             } else {
                 command_export(arg1, arg2, iso_file, super_block, state);
             }
+        } else {
+            cout << "Erro: comando desconhecido '" << command << "'." << endl;
         }
     }
     return 0;
