@@ -124,10 +124,10 @@ int start_shell(fstream& iso_file){
             cout << "Bloco " << arg1 << " esta " << (used ? "OCUPADO" : "LIVRE") << endl;
 
         } else if (command == "touch") {
-            touch(arg1);
+            touch(arg1, iso_file, super_block, state);
 
         } else if (command == "mkdir") {
-            mkdir(arg1);
+            mkdir(arg1, iso_file, super_block, state);
 
         } else if (command == "rm") {
             rm(arg1);

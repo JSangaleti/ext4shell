@@ -117,6 +117,7 @@ struct ext4_dir_entry_2 {
     uint16_t rec_len;    // Tamanho total deste registro
     uint8_t name_len;    // Tamanho do nome do arquivo
     uint8_t file_type;   // Tipo: 1 = Arquivo, 2 = Diretório
+    char     name[];
 } __attribute__((packed));
 
 void read_superblock(fstream& iso_file, ext4_super_block& block_out, int pos);
@@ -132,3 +133,15 @@ uint64_t get_physical_block(const ext4_inode& inode, uint32_t logical_block);
 vector<FileEntry> search_filedir(fstream& iso_file, const ext4_super_block& sb, uint32_t dir_inode_num, const string& target_name = "");
 
 bool check_bit(const char* bitmap, uint32_t bit_index);
+
+void set_bit(char* bitmap, uint32_t bit_index);
+
+uint32_t allocate_inode(fstream& iso_file, ext4_super_block& sb);
+
+void write_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, const ext4_inode& inode);
+
+uint32_t get_dir_rec_len(uint32_t name_length);
+
+bool add_dir_entry(fstream& iso_file, const ext4_super_block& sb, uint32_t parent_inode_num, uint32_t target_inode, const string& name, uint8_t file_type);
+
+uint64_t allocate_block(fstream& iso_file, ext4_super_block& sb);

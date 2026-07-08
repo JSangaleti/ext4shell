@@ -237,9 +237,130 @@ void command_export(const string source_path, const string target_path, fstream&
 
 // --- WRITE ---
 
-void touch(const string file) { cout << "falta implementar" << endl; }
+void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    // 0. Verifica se o arquivo já existe no diretório atual
+    auto existing = search_filedir(iso_file, sb, state.current_inode, file);
+    if (!existing.empty()) {
+        cout << "touch: Impossivel criar '" << file << "': Arquivo ou diretorio ja existe" << endl;
+        return;
+    }
 
-void mkdir(const string dir) { cout << "falta implementar" << endl; }
+    // 1. Aloca um inode livre
+    uint32_t new_inode_num = allocate_inode(iso_file, sb);
+    if (new_inode_num == 0) { 
+        cout << "touch: Erro - Disco cheio ou sem inodes livres." << endl; 
+        return; 
+    }
+
+    // 2. Monta a estrutura do novo arquivo (vazio)
+    ext4_inode new_inode{};
+    new_inode.i_mode = 0x81A4; // 0x8000 (Arquivo Regular) + 0644 (Permissões rw-r--r--)
+    new_inode.i_size_lo = 0;
+    new_inode.i_links_count = 1;
+    new_inode.i_ctime = new_inode.i_atime = new_inode.i_mtime = time(nullptr);
+    
+    // Header mínimo de Extents
+    new_inode.i_block[0] = 0x0A;
+    new_inode.i_block[1] = 0xF3;
+
+    // 3. Escreve o Inode no disco
+    write_inode(iso_file, sb, new_inode_num, new_inode);
+
+    // 4. Ligar ao diretório atual
+    // 4. Ligar ao diretório atual (1 = Arquivo Regular)
+    bool success = add_dir_entry(iso_file, sb, state.current_inode, new_inode_num, file, 1);
+    
+    if (success) {
+        cout << "Arquivo criado com sucesso: " << file << " (Inode: " << new_inode_num << ")" << endl;
+    }
+}
+
+void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    // 0. Verifica se o nome já existe
+    auto existing = search_filedir(iso_file, sb, state.current_inode, dir);
+    if (!existing.empty()) {
+        cout << "mkdir: Impossivel criar o diretorio '" << dir << "': Arquivo ou diretorio ja existe" << endl;
+        return;
+    }
+
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+
+    // 1. Aloca um inode e um bloco de dados
+    uint32_t new_inode_num = allocate_inode(iso_file, sb);
+    uint64_t new_block_num = allocate_block(iso_file, sb);
+
+    if (new_inode_num == 0 || new_block_num == 0) {
+        cout << "mkdir: Erro - Disco cheio (inode ou block)." << endl;
+        return;
+    }
+
+    // 2. Monta o novo Inode do diretório
+    ext4_inode new_inode{};
+    new_inode.i_mode = 0x41ED; // 0x4000 (Diretório) + 0755 (Permissões rwxr-xr-x)
+    new_inode.i_size_lo = block_size; // Um diretório começa ocupando 1 bloco
+    new_inode.i_links_count = 2; // '.' e a si mesmo
+    new_inode.i_blocks_lo = block_size / 512; // Número de setores (blocos de 512b)
+    new_inode.i_ctime = new_inode.i_atime = new_inode.i_mtime = time(nullptr);
+    
+    // Criamos as structs locais e depois copiamos para o array i_block
+    struct ext4_extent_header {
+        uint16_t eh_magic; uint16_t eh_entries; uint16_t eh_max;
+        uint16_t eh_depth; uint32_t eh_generation;
+    } eh;
+    eh.eh_magic = 0xF30A;
+    eh.eh_entries = 1;
+    eh.eh_max = 4;
+    eh.eh_depth = 0;
+    eh.eh_generation = 0;
+    memcpy(&new_inode.i_block[0], &eh, sizeof(ext4_extent_header));
+
+    struct ext4_extent {
+        uint32_t ee_block; uint16_t ee_len;
+        uint16_t ee_start_hi; uint32_t ee_start_lo;
+    } ex;
+    ex.ee_block = 0; 
+    ex.ee_len = 1;
+    ex.ee_start_hi = (new_block_num >> 32) & 0xFFFF;
+    ex.ee_start_lo = new_block_num & 0xFFFFFFFF;
+    memcpy(&new_inode.i_block[3], &ex, sizeof(ext4_extent));
+
+    // 3. Inicializa o novo bloco com '.' e '..'
+    vector<char> dir_buffer(block_size, 0);
+    
+    // Entrada '.'
+    ext4_dir_entry_2* dot = reinterpret_cast<ext4_dir_entry_2*>(dir_buffer.data());
+    dot->inode = new_inode_num;
+    dot->rec_len = 12; // 8 bytes fixos + 1 char (arredondado pra 4)
+    dot->name_len = 1;
+    dot->file_type = 2; // Diretório
+    dot->name[0] = '.';
+
+    // Entrada '..' (usa todo o resto do bloco)
+    ext4_dir_entry_2* dotdot = reinterpret_cast<ext4_dir_entry_2*>(dir_buffer.data() + dot->rec_len);
+    dotdot->inode = state.current_inode;
+    dotdot->rec_len = block_size - dot->rec_len;
+    dotdot->name_len = 2;
+    dotdot->file_type = 2;
+    dotdot->name[0] = '.'; dotdot->name[1] = '.';
+
+    // Grava o bloco do novo diretório no disco
+    iso_file.seekp(new_block_num * block_size);
+    iso_file.write(dir_buffer.data(), block_size);
+
+    // 4. Salva o Inode no disco e adiciona no diretório atual
+    write_inode(iso_file, sb, new_inode_num, new_inode);
+    bool success = add_dir_entry(iso_file, sb, state.current_inode, new_inode_num, dir, 2); // 2 = Directory
+    
+    if (success) {
+        // Incrementa o contador de links do diretório pai (por causa do '..')
+        ext4_inode parent_inode;
+        read_inode(iso_file, sb, state.current_inode, parent_inode);
+        parent_inode.i_links_count++;
+        write_inode(iso_file, sb, state.current_inode, parent_inode);
+
+        cout << "Diretorio criado com sucesso: " << dir << endl;
+    }
+}
 
 void rm(const string file) { cout << "falta implementar" << endl; }
 

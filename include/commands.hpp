@@ -29,9 +29,9 @@ void pwd(const fs_state& state);
 
 // [WRITE]:
 
-void touch(const string file); 
+void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& state);
 
-void mkdir(const string dir); 
+void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& state);
 
 void rm(const string file); 
 
