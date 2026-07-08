@@ -37,7 +37,7 @@ void rm(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& st
 
 void rmdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& state);
 
-void rename(const string file, const string new_file_name); 
+void rename(const string file, const string new_file_name, fstream& iso_file, ext4_super_block& sb, fs_state& state); 
 
 // [DEBUG]:
 

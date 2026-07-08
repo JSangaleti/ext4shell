@@ -438,7 +438,42 @@ void rmdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
     }
 }
 
-void rename(const string file, const string new_file_name) { cout << "falta implementar" << endl; }
+void rename(const string file, const string new_file_name, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    if (file == "." || file == "..") {
+        cout << "rename: Impossivel renomear atalhos de sistema." << endl;
+        return;
+    }
+
+    // 1. Verifica se o arquivo de origem existe
+    auto src_entries = search_filedir(iso_file, sb, state.current_inode, file);
+    if (src_entries.empty()) {
+        cout << "rename: '" << file << "' nao encontrado." << endl;
+        return;
+    }
+
+    // 2. Verifica se o novo nome já está em uso
+    auto dest_entries = search_filedir(iso_file, sb, state.current_inode, new_file_name);
+    if (!dest_entries.empty()) {
+        cout << "rename: Impossivel renomear. O nome '" << new_file_name << "' ja existe." << endl;
+        return;
+    }
+
+    uint32_t target_inode = src_entries[0].inode;
+    uint8_t target_type = src_entries[0].file_type;
+
+    // 3. Apaga a entrada antiga da pasta
+    if (remove_dir_entry(iso_file, sb, state.current_inode, file)) {
+        
+        // 4. Cria a nova entrada apontando para os mesmos dados
+        if (add_dir_entry(iso_file, sb, state.current_inode, target_inode, new_file_name, target_type)) {
+            cout << "Sucesso: '" << file << "' renomeado para '" << new_file_name << "'" << endl;
+        } else {
+            cout << "Erro ao alocar novo nome no diretorio." << endl;
+        }
+    } else {
+        cout << "rename: Erro ao remover a entrada antiga." << endl;
+    }
+}
 
 // --- DEBUG ---
 

@@ -139,7 +139,7 @@ int start_shell(fstream& iso_file){
             if (arg1.empty() || arg2.empty()) {
                 cout << "Erro: rename precisa de dois argumentos." << endl;
             } else {
-                rename(arg1, arg2);
+                rename(arg1, arg2, iso_file, super_block, state);
             }
 
         } else if (command == "export") {
