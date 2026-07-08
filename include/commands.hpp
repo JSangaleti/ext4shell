@@ -8,6 +8,8 @@
 
 using namespace std;
 
+void help();
+
 // [READ]:
 void info(const ext4_super_block& super_block, const fs_state& state);
 

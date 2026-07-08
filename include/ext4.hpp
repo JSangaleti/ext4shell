@@ -120,6 +120,26 @@ struct ext4_dir_entry_2 {
     char     name[];
 } __attribute__((packed));
 
+// --- Constantes e Flags do EXT4 ---
+constexpr uint32_t EXT4_FEATURE_RO_COMPAT_METADATA_CSUM = 0x0400;
+constexpr uint32_t EXT4_SUPERBLOCK_OFFSET = 1024;
+constexpr uint32_t EXT4_SUPERBLOCK_UUID_OFFSET = 104;
+constexpr uint16_t EXT4_DIR_ENTRY_TAIL_REC_LEN = 12;
+constexpr uint8_t EXT4_FT_DIR_CSUM = 0xDE;
+constexpr uint32_t EXT4_FEATURE_INCOMPAT_64BIT = 0x0080;
+constexpr uint32_t EXT4_FEATURE_INCOMPAT_EXTENTS = 0x0040;
+constexpr uint32_t EXT4_GROUP_DESC_SIZE_64BIT = 64;
+constexpr uint32_t EXT4_GROUP_DESC_SIZE_LEGACY = 32;
+constexpr uint32_t EXT4_GD_BLOCK_BITMAP_CSUM_LO_OFFSET = 0x18;
+constexpr uint32_t EXT4_GD_INODE_BITMAP_CSUM_LO_OFFSET = 0x1A;
+constexpr uint32_t EXT4_GD_ITABLE_UNUSED_LO_OFFSET = 0x1C;
+constexpr uint32_t EXT4_GD_CHECKSUM_OFFSET = 0x1E;
+constexpr uint32_t EXT4_GD_BLOCK_BITMAP_CSUM_HI_OFFSET = 0x38;
+constexpr uint32_t EXT4_GD_INODE_BITMAP_CSUM_HI_OFFSET = 0x3A;
+constexpr uint32_t EXT4_INODE_CSUM_LO_OFFSET = 0x7C;
+constexpr uint32_t EXT4_INODE_EXTRA_ISIZE_OFFSET = 0x80;
+constexpr uint32_t EXT4_INODE_CSUM_HI_OFFSET = 0x82;
+
 void read_superblock(fstream& iso_file, ext4_super_block& block_out, int pos);
 
 void read_block(std::fstream& iso_file, uint32_t block_number, uint32_t block_size, char* buffer);
@@ -136,9 +156,15 @@ bool check_bit(const char* bitmap, uint32_t bit_index);
 
 void set_bit(char* bitmap, uint32_t bit_index);
 
+bool ext4_has_metadata_csum(const ext4_super_block& sb);
+
 uint32_t allocate_inode(fstream& iso_file, ext4_super_block& sb);
 
 void write_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, const ext4_inode& inode);
+
+void update_dir_block_checksum(fstream& iso_file, const ext4_super_block& sb, uint32_t dir_inode_num, const ext4_inode& dir_inode, char* dir_block, uint32_t block_size);
+
+void update_group_used_dirs_count(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, int delta);
 
 uint32_t get_dir_rec_len(uint32_t name_length);
 

@@ -1,4 +1,188 @@
 #include "ext4.hpp"
+#include "ext4checksum.h"
+
+
+
+static bool read_superblock_uuid(fstream& iso_file, char uuid[16]) {
+    iso_file.clear();
+    iso_file.seekg(EXT4_SUPERBLOCK_OFFSET + EXT4_SUPERBLOCK_UUID_OFFSET);
+    return static_cast<bool>(iso_file.read(uuid, 16));
+}
+
+static uint32_t group_desc_size(const ext4_super_block& sb) {
+    return (sb.s_feature_incompat & EXT4_FEATURE_INCOMPAT_64BIT) ? EXT4_GROUP_DESC_SIZE_64BIT : EXT4_GROUP_DESC_SIZE_LEGACY;
+}
+
+static uint32_t groups_count(const ext4_super_block& sb) {
+    uint32_t count = sb.s_blocks_count_lo / sb.s_blocks_per_group;
+    if (sb.s_blocks_count_lo % sb.s_blocks_per_group != 0) {
+        count++;
+    }
+    return count;
+}
+
+static uint32_t inodes_in_group(const ext4_super_block& sb, uint32_t group_num) {
+    uint32_t first_inode = group_num * sb.s_inodes_per_group;
+    if (first_inode >= sb.s_inodes_count) {
+        return 0;
+    }
+
+    uint32_t remaining = sb.s_inodes_count - first_inode;
+    return remaining < sb.s_inodes_per_group ? remaining : sb.s_inodes_per_group;
+}
+
+static uint64_t group_desc_offset(const ext4_super_block& sb, uint32_t group_num, uint32_t block_size) {
+    uint32_t bgd_block = sb.s_first_data_block + 1;
+    return (static_cast<uint64_t>(bgd_block) * block_size) + (static_cast<uint64_t>(group_num) * group_desc_size(sb));
+}
+
+static void write_le16(vector<char>& data, uint32_t offset, uint16_t value) {
+    if (offset + sizeof(value) <= data.size()) {
+        memcpy(data.data() + offset, &value, sizeof(value));
+    }
+}
+
+static bool read_group_desc_raw(fstream& iso_file, const ext4_super_block& sb, uint32_t group_num, uint32_t block_size, vector<char>& raw_desc, ext4_group_desc& bgd) {
+    uint32_t desc_size = group_desc_size(sb);
+    raw_desc.assign(desc_size, 0);
+    memset(&bgd, 0, sizeof(bgd));
+
+    iso_file.clear();
+    iso_file.seekg(group_desc_offset(sb, group_num, block_size));
+    if (!iso_file.read(raw_desc.data(), raw_desc.size())) {
+        return false;
+    }
+
+    memcpy(&bgd, raw_desc.data(), sizeof(ext4_group_desc));
+    return true;
+}
+
+static void sync_group_desc_to_raw(vector<char>& raw_desc, const ext4_group_desc& bgd) {
+    if (raw_desc.size() >= sizeof(ext4_group_desc)) {
+        memcpy(raw_desc.data(), &bgd, sizeof(ext4_group_desc));
+    }
+}
+
+static bool update_bitmap_checksum(fstream& iso_file, const ext4_super_block& sb, vector<char>& raw_desc, const vector<char>& bitmap, size_t checksum_size, bool inode_bitmap) {
+    if (!ext4_has_metadata_csum(sb)) {
+        return true;
+    }
+
+    char uuid[16] = {0};
+    if (!read_superblock_uuid(iso_file, uuid)) {
+        return false;
+    }
+
+    if (checksum_size > bitmap.size()) {
+        checksum_size = bitmap.size();
+    }
+
+    uint32_t checksum = checksum_bitmap(uuid, const_cast<char*>(bitmap.data()), checksum_size);
+    uint16_t checksum_lo = checksum & 0xFFFF;
+    uint16_t checksum_hi = (checksum >> 16) & 0xFFFF;
+
+    uint32_t lo_offset = inode_bitmap ? EXT4_GD_INODE_BITMAP_CSUM_LO_OFFSET : EXT4_GD_BLOCK_BITMAP_CSUM_LO_OFFSET;
+    uint32_t hi_offset = inode_bitmap ? EXT4_GD_INODE_BITMAP_CSUM_HI_OFFSET : EXT4_GD_BLOCK_BITMAP_CSUM_HI_OFFSET;
+
+    write_le16(raw_desc, lo_offset, checksum_lo);
+    write_le16(raw_desc, hi_offset, checksum_hi);
+    return true;
+}
+
+static bool write_group_desc_raw(fstream& iso_file, const ext4_super_block& sb, uint32_t group_num, uint32_t block_size, vector<char>& raw_desc) {
+    if (ext4_has_metadata_csum(sb) && raw_desc.size() >= EXT4_GROUP_DESC_SIZE_64BIT) {
+        char uuid[16] = {0};
+        if (!read_superblock_uuid(iso_file, uuid)) {
+            return false;
+        }
+
+        uint16_t checksum = checksum_group(uuid, group_num, raw_desc.data());
+        write_le16(raw_desc, EXT4_GD_CHECKSUM_OFFSET, checksum);
+    }
+
+    iso_file.clear();
+    iso_file.seekp(group_desc_offset(sb, group_num, block_size));
+    iso_file.write(raw_desc.data(), raw_desc.size());
+    return static_cast<bool>(iso_file);
+}
+
+static uint16_t recompute_itable_unused(const ext4_super_block& sb, uint32_t group_num, const vector<char>& inode_bitmap) {
+    uint32_t local_inodes = inodes_in_group(sb, group_num);
+    uint32_t unused = 0;
+
+    for (uint32_t bit = local_inodes; bit > 0; --bit) {
+        if (check_bit(inode_bitmap.data(), bit - 1)) {
+            break;
+        }
+        unused++;
+    }
+
+    return unused > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(unused);
+}
+
+static size_t inode_bitmap_checksum_size(const ext4_super_block& sb, uint32_t group_num) {
+    return (inodes_in_group(sb, group_num) + 7) / 8;
+}
+
+static size_t block_bitmap_checksum_size(const ext4_super_block& sb, uint32_t block_size) {
+    size_t bitmap_size = (sb.s_blocks_per_group + 7) / 8;
+    return bitmap_size > block_size ? block_size : bitmap_size;
+}
+
+static uint16_t read_le16_from_vector(const vector<char>& data, uint32_t offset) {
+    uint16_t value = 0;
+    if (offset + sizeof(value) <= data.size()) {
+        memcpy(&value, data.data() + offset, sizeof(value));
+    }
+    return value;
+}
+
+bool ext4_has_metadata_csum(const ext4_super_block& sb) {
+    return (sb.s_feature_ro_compat & EXT4_FEATURE_RO_COMPAT_METADATA_CSUM) != 0;
+}
+
+static void write_superblock(fstream& iso_file, const ext4_super_block& sb) {
+    vector<char> raw_superblock(1024, 0);
+
+    iso_file.clear();
+    iso_file.seekg(EXT4_SUPERBLOCK_OFFSET);
+    iso_file.read(raw_superblock.data(), raw_superblock.size());
+
+    memcpy(raw_superblock.data(), &sb, sizeof(ext4_super_block));
+
+    if (ext4_has_metadata_csum(sb)) {
+        uint32_t checksum = checksum_superblock(raw_superblock.data());
+        memcpy(raw_superblock.data() + 1020, &checksum, sizeof(checksum));
+    }
+
+    iso_file.seekp(EXT4_SUPERBLOCK_OFFSET);
+    iso_file.write(raw_superblock.data(), raw_superblock.size());
+}
+
+void update_dir_block_checksum(fstream& iso_file, const ext4_super_block& sb, uint32_t dir_inode_num, const ext4_inode& dir_inode, char* dir_block, uint32_t block_size) {
+    if (!ext4_has_metadata_csum(sb) || block_size < EXT4_DIR_ENTRY_TAIL_REC_LEN) {
+        return;
+    }
+
+    char uuid[16] = {0};
+    if (!read_superblock_uuid(iso_file, uuid)) {
+        return;
+    }
+
+    char* tail = dir_block + block_size - EXT4_DIR_ENTRY_TAIL_REC_LEN;
+    uint32_t zero_inode = 0;
+    uint16_t rec_len = EXT4_DIR_ENTRY_TAIL_REC_LEN;
+    uint8_t name_len = 0;
+    uint8_t file_type = EXT4_FT_DIR_CSUM;
+
+    memcpy(tail, &zero_inode, sizeof(zero_inode));
+    memcpy(tail + 4, &rec_len, sizeof(rec_len));
+    memcpy(tail + 6, &name_len, sizeof(name_len));
+    memcpy(tail + 7, &file_type, sizeof(file_type));
+
+    uint32_t checksum = checksum_dir(uuid, dir_inode_num, dir_inode.i_generation, dir_block, block_size);
+    memcpy(tail + 8, &checksum, sizeof(checksum));
+}
 
 void read_superblock(fstream& iso_file, ext4_super_block& block_out, int pos) {
     iso_file.seekg(pos);
@@ -166,23 +350,22 @@ void set_bit(char* bitmap, uint32_t bit_index) {
 
 uint32_t allocate_inode(fstream& iso_file, ext4_super_block& sb) {
     uint32_t block_size = 1024 << sb.s_log_block_size;
-    uint32_t bgd_block = sb.s_first_data_block + 1;
-    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
+    uint32_t total_groups = groups_count(sb);
 
-    uint32_t groups_count = sb.s_blocks_count_lo / sb.s_blocks_per_group;
-    if (sb.s_blocks_count_lo % sb.s_blocks_per_group != 0) groups_count++;
-
-    for (uint32_t g = 0; g < groups_count; g++) {
+    for (uint32_t g = 0; g < total_groups; g++) {
         ext4_group_desc bgd;
-        iso_file.seekg((uint64_t)bgd_block * block_size + (g * desc_size));
-        iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+        vector<char> raw_desc;
+        if (!read_group_desc_raw(iso_file, sb, g, block_size, raw_desc, bgd)) {
+            continue;
+        }
 
         if (bgd.bg_free_inodes_count_lo > 0) {
             vector<char> bitmap(block_size);
             iso_file.seekg((uint64_t)bgd.bg_inode_bitmap_lo * block_size);
             iso_file.read(bitmap.data(), block_size);
 
-            for (uint32_t bit = 0; bit < sb.s_inodes_per_group; bit++) {
+            uint32_t local_inodes = inodes_in_group(sb, g);
+            for (uint32_t bit = 0; bit < local_inodes; bit++) {
                 if (!check_bit(bitmap.data(), bit)) {
                     
                     set_bit(bitmap.data(), bit);
@@ -191,12 +374,16 @@ uint32_t allocate_inode(fstream& iso_file, ext4_super_block& sb) {
                     iso_file.write(bitmap.data(), block_size);
 
                     bgd.bg_free_inodes_count_lo--;
-                    iso_file.seekp((uint64_t)bgd_block * block_size + (g * desc_size));
-                    iso_file.write(reinterpret_cast<const char*>(&bgd), sizeof(ext4_group_desc));
+                    uint32_t first_unused_idx = local_inodes - bgd.bg_itable_unused_lo;
+                    if (bit >= first_unused_idx) {
+                        bgd.bg_itable_unused_lo = local_inodes - bit - 1;
+                    }
+                    sync_group_desc_to_raw(raw_desc, bgd);
+                    update_bitmap_checksum(iso_file, sb, raw_desc, bitmap, inode_bitmap_checksum_size(sb, g), true);
+                    write_group_desc_raw(iso_file, sb, g, block_size, raw_desc);
 
                     sb.s_free_inodes_count--;
-                    iso_file.seekp(1024);
-                    iso_file.write(reinterpret_cast<const char*>(&sb), sizeof(ext4_super_block));
+                    write_superblock(iso_file, sb);
 
                     return (g * sb.s_inodes_per_group) + bit + 1;
                 }
@@ -207,6 +394,8 @@ uint32_t allocate_inode(fstream& iso_file, ext4_super_block& sb) {
 }
 
 void write_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, const ext4_inode& inode) {
+    iso_file.clear();
+
     uint32_t block_size = 1024 << sb.s_log_block_size;
     uint32_t group_num = (inode_num - 1) / sb.s_inodes_per_group;
     uint32_t local_idx = (inode_num - 1) % sb.s_inodes_per_group;
@@ -219,10 +408,65 @@ void write_inode(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_n
     iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
 
     uint64_t inode_table_offset = (uint64_t)bgd.bg_inode_table_lo * block_size;
+    uint64_t exact_inode_offset = inode_table_offset + (local_idx * sb.s_inode_size);
+
+    vector<char> raw_inode(sb.s_inode_size, 0);
+
+    iso_file.seekg(exact_inode_offset);
+    iso_file.read(raw_inode.data(), sb.s_inode_size);
+
+    bool inode_was_free = read_le16_from_vector(raw_inode, 0) == 0;
+    if (inode_was_free) {
+        memset(raw_inode.data(), 0, raw_inode.size());
+    }
+
+    size_t bytes_to_copy = sizeof(ext4_inode);
+    if (bytes_to_copy > raw_inode.size()) {
+        bytes_to_copy = raw_inode.size();
+    }
+
+    memcpy(raw_inode.data(), &inode, bytes_to_copy);
+
+    if (ext4_has_metadata_csum(sb) && raw_inode.size() >= sb.s_inode_size && raw_inode.size() >= 256) {
+        char uuid[16] = {0};
+        if (read_superblock_uuid(iso_file, uuid)) {
+            uint32_t checksum = checksum_inode(uuid, inode_num, inode.i_generation, raw_inode.data());
+            uint16_t checksum_lo = checksum & 0xFFFF;
+            uint16_t checksum_hi = (checksum >> 16) & 0xFFFF;
+            uint16_t extra_isize = read_le16_from_vector(raw_inode, EXT4_INODE_EXTRA_ISIZE_OFFSET);
+
+            memcpy(raw_inode.data() + EXT4_INODE_CSUM_LO_OFFSET, &checksum_lo, sizeof(checksum_lo));
+            if (extra_isize >= 4 && EXT4_INODE_CSUM_HI_OFFSET + sizeof(checksum_hi) <= raw_inode.size()) {
+                memcpy(raw_inode.data() + EXT4_INODE_CSUM_HI_OFFSET, &checksum_hi, sizeof(checksum_hi));
+            }
+        }
+    }
     
-    // Grava o inode na tabela
-    iso_file.seekp(inode_table_offset + (local_idx * sb.s_inode_size));
-    iso_file.write(reinterpret_cast<const char*>(&inode), sb.s_inode_size);
+    // Preserva os bytes estendidos do inode que ainda nao sao modelados pela struct.
+    iso_file.seekp(exact_inode_offset);
+    iso_file.write(raw_inode.data(), raw_inode.size());
+}
+
+void update_group_used_dirs_count(fstream& iso_file, const ext4_super_block& sb, uint32_t inode_num, int delta) {
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t group_num = (inode_num - 1) / sb.s_inodes_per_group;
+
+    ext4_group_desc bgd;
+    vector<char> raw_desc;
+    if (!read_group_desc_raw(iso_file, sb, group_num, block_size, raw_desc, bgd)) {
+        return;
+    }
+
+    if (delta > 0) {
+        uint32_t updated = bgd.bg_used_dirs_count_lo + static_cast<uint32_t>(delta);
+        bgd.bg_used_dirs_count_lo = updated > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(updated);
+    } else if (delta < 0) {
+        uint32_t decrement = static_cast<uint32_t>(-delta);
+        bgd.bg_used_dirs_count_lo = decrement > bgd.bg_used_dirs_count_lo ? 0 : bgd.bg_used_dirs_count_lo - decrement;
+    }
+
+    sync_group_desc_to_raw(raw_desc, bgd);
+    write_group_desc_raw(iso_file, sb, group_num, block_size, raw_desc);
 }
 
 // Função para arredondar o tamanho para o múltiplo de 4 mais próximo
@@ -279,6 +523,8 @@ bool add_dir_entry(fstream& iso_file, const ext4_super_block& sb, uint32_t paren
                     new_entry->file_type = file_type;
                     memcpy(new_entry->name, name.c_str(), name.length());
 
+                    update_dir_block_checksum(iso_file, sb, parent_inode_num, parent_inode, buffer.data(), block_size);
+
                     // 3. Salva o bloco modificado no disco
                     iso_file.seekp(phys_block * block_size);
                     iso_file.write(buffer.data(), block_size);
@@ -300,15 +546,14 @@ bool add_dir_entry(fstream& iso_file, const ext4_super_block& sb, uint32_t paren
 
 uint64_t allocate_block(fstream& iso_file, ext4_super_block& sb) {
     uint32_t block_size = 1024 << sb.s_log_block_size;
-    uint32_t bgd_block = sb.s_first_data_block + 1;
-    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
-    uint32_t groups_count = sb.s_blocks_count_lo / sb.s_blocks_per_group;
-    if (sb.s_blocks_count_lo % sb.s_blocks_per_group != 0) groups_count++;
+    uint32_t total_groups = groups_count(sb);
 
-    for (uint32_t g = 0; g < groups_count; g++) {
+    for (uint32_t g = 0; g < total_groups; g++) {
         ext4_group_desc bgd;
-        iso_file.seekg((uint64_t)bgd_block * block_size + (g * desc_size));
-        iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+        vector<char> raw_desc;
+        if (!read_group_desc_raw(iso_file, sb, g, block_size, raw_desc, bgd)) {
+            continue;
+        }
 
         if (bgd.bg_free_blocks_count_lo > 0) {
             vector<char> bitmap(block_size);
@@ -324,12 +569,12 @@ uint64_t allocate_block(fstream& iso_file, ext4_super_block& sb) {
                     iso_file.write(bitmap.data(), block_size);
 
                     bgd.bg_free_blocks_count_lo--;
-                    iso_file.seekp((uint64_t)bgd_block * block_size + (g * desc_size));
-                    iso_file.write(reinterpret_cast<const char*>(&bgd), sizeof(ext4_group_desc));
+                    sync_group_desc_to_raw(raw_desc, bgd);
+                    update_bitmap_checksum(iso_file, sb, raw_desc, bitmap, block_bitmap_checksum_size(sb, block_size), false);
+                    write_group_desc_raw(iso_file, sb, g, block_size, raw_desc);
 
                     sb.s_free_blocks_count_lo--;
-                    iso_file.seekp(1024);
-                    iso_file.write(reinterpret_cast<const char*>(&sb), sizeof(ext4_super_block));
+                    write_superblock(iso_file, sb);
 
                     // O número do bloco é = Primeiro bloco de dados (0 ou 1) + (Grupo * blocos por grupo) + bit local
                     uint64_t new_block = sb.s_first_data_block + (g * sb.s_blocks_per_group) + bit;
@@ -353,11 +598,10 @@ void free_inode(fstream& iso_file, ext4_super_block& sb, uint32_t inode_num) {
     uint32_t local_idx = (inode_num - 1) % sb.s_inodes_per_group;
 
     ext4_group_desc bgd;
-    uint32_t bgd_block = sb.s_first_data_block + 1;
-    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
-    
-    iso_file.seekg((uint64_t)bgd_block * block_size + (group_num * desc_size));
-    iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+    vector<char> raw_desc;
+    if (!read_group_desc_raw(iso_file, sb, group_num, block_size, raw_desc, bgd)) {
+        return;
+    }
 
     vector<char> bitmap(block_size);
     iso_file.seekg((uint64_t)bgd.bg_inode_bitmap_lo * block_size);
@@ -370,12 +614,13 @@ void free_inode(fstream& iso_file, ext4_super_block& sb, uint32_t inode_num) {
     iso_file.write(bitmap.data(), block_size);
 
     bgd.bg_free_inodes_count_lo++;
-    iso_file.seekp((uint64_t)bgd_block * block_size + (group_num * desc_size));
-    iso_file.write(reinterpret_cast<const char*>(&bgd), sizeof(ext4_group_desc));
+    bgd.bg_itable_unused_lo = recompute_itable_unused(sb, group_num, bitmap);
+    sync_group_desc_to_raw(raw_desc, bgd);
+    update_bitmap_checksum(iso_file, sb, raw_desc, bitmap, inode_bitmap_checksum_size(sb, group_num), true);
+    write_group_desc_raw(iso_file, sb, group_num, block_size, raw_desc);
 
     sb.s_free_inodes_count++;
-    iso_file.seekp(1024);
-    iso_file.write(reinterpret_cast<const char*>(&sb), sizeof(ext4_super_block));
+    write_superblock(iso_file, sb);
 }
 
 bool remove_dir_entry(fstream& iso_file, const ext4_super_block& sb, uint32_t parent_inode_num, const string& name) {
@@ -411,6 +656,8 @@ bool remove_dir_entry(fstream& iso_file, const ext4_super_block& sb, uint32_t pa
                     entry->inode = 0; 
                 }
 
+                update_dir_block_checksum(iso_file, sb, parent_inode_num, parent_inode, buffer.data(), block_size);
+
                 iso_file.seekp(phys_block * block_size);
                 iso_file.write(buffer.data(), block_size);
                 return true;
@@ -439,11 +686,10 @@ void free_block(fstream& iso_file, ext4_super_block& sb, uint64_t block_num) {
     uint32_t local_idx = (block_num - sb.s_first_data_block) % sb.s_blocks_per_group;
 
     ext4_group_desc bgd;
-    uint32_t bgd_block = sb.s_first_data_block + 1;
-    uint32_t desc_size = (sb.s_feature_incompat & 0x80) ? 64 : 32;
-
-    iso_file.seekg((uint64_t)bgd_block * block_size + (group_num * desc_size));
-    iso_file.read(reinterpret_cast<char*>(&bgd), sizeof(ext4_group_desc));
+    vector<char> raw_desc;
+    if (!read_group_desc_raw(iso_file, sb, group_num, block_size, raw_desc, bgd)) {
+        return;
+    }
 
     vector<char> bitmap(block_size);
     iso_file.seekg((uint64_t)bgd.bg_block_bitmap_lo * block_size);
@@ -456,10 +702,10 @@ void free_block(fstream& iso_file, ext4_super_block& sb, uint64_t block_num) {
     iso_file.write(bitmap.data(), block_size);
 
     bgd.bg_free_blocks_count_lo++;
-    iso_file.seekp((uint64_t)bgd_block * block_size + (group_num * desc_size));
-    iso_file.write(reinterpret_cast<const char*>(&bgd), sizeof(ext4_group_desc));
+    sync_group_desc_to_raw(raw_desc, bgd);
+    update_bitmap_checksum(iso_file, sb, raw_desc, bitmap, block_bitmap_checksum_size(sb, block_size), false);
+    write_group_desc_raw(iso_file, sb, group_num, block_size, raw_desc);
 
     sb.s_free_blocks_count_lo++;
-    iso_file.seekp(1024);
-    iso_file.write(reinterpret_cast<const char*>(&sb), sizeof(ext4_super_block));
+    write_superblock(iso_file, sb);
 }

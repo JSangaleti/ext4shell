@@ -1,5 +1,59 @@
 #include "commands.hpp"
 
+static constexpr uint32_t EXT4_EXTENTS_FL = 0x00080000;
+
+static uint64_t inode_size_bytes(const ext4_inode& inode) {
+    return (static_cast<uint64_t>(inode.i_size_high) << 32) | inode.i_size_lo;
+}
+
+static uint32_t count_logical_blocks(uint64_t file_size, uint32_t block_size) {
+    if (file_size == 0) {
+        return 0;
+    }
+
+    return (file_size + block_size - 1) / block_size;
+}
+
+static bool is_valid_entry_name(const string& name) {
+    return !name.empty() && name.size() <= 255 && name.find('/') == string::npos;
+}
+
+// -- HELP ---
+void help() {
+
+    cout << "===============================================================" << endl;
+    cout << "                 COMANDOS DISPONIVEIS - EXT4SHELL              " << endl;
+    cout << "===============================================================" << endl;
+    
+    cout << "\n[ Navegacao e Informacao ]" << endl;
+    cout << "  info                - Exibe informacoes do superbloco do disco" << endl;
+    cout << "  pwd                 - Imprime o caminho do diretorio atual" << endl;
+    cout << "  cd <dir>            - Entra no diretorio especificado" << endl;
+    cout << "  ls                  - Lista o conteudo do diretorio atual" << endl;
+    cout << "  attr <nome>         - Exibe os metadados (tamanho, tipo) de um arquivo" << endl;
+    
+    cout << "\n[ Manipulacao de Arquivos e Diretorios ]" << endl;
+    cout << "  touch <arquivo>     - Cria um novo arquivo regular vazio" << endl;
+    cout << "  mkdir <dir>         - Cria um novo diretorio" << endl;
+    cout << "  rm <arquivo>        - Remove um arquivo (liberando blocos e inode)" << endl;
+    cout << "  rmdir <dir>         - Remove um diretorio (se estiver vazio)" << endl;
+    cout << "  rename <old> <new>  - Renomeia arquivo/diretorio" << endl;
+    cout << "  cat <arquivo>       - Exibe o texto de um arquivo na tela" << endl;
+    cout << "  export <ext4> <os>  - Copia um arquivo do ext4 para o seu sistema real" << endl;
+    
+    cout << "\n[ Debug ]" << endl;
+    cout << "  print_inode <num>   - Inspeciona a estrutura raw de um Inode especifico" << endl;
+    cout << "  print_block <num>   - Exibe o hexdump do conteudo fisico de um bloco" << endl;
+    cout << "  print_superblock    - Exibe informações sobre o superbloco" << endl;
+    cout << "  testi <num>         - Verifica no Bitmap de Inodes se <num> esta em uso" << endl;
+    cout << "  testb <num>         - Verifica no Bitmap de Blocos se <num> esta em uso" << endl;
+    
+    cout << "\n[ Sistema ]" << endl;
+    cout << "  help                - Exibe este manual de comandos" << endl;
+    cout << "  exit ou quit        - encerra o shell" << endl;
+    cout << "===============================================================" << endl;
+}
+
 // --- READ ---
 
 void info(const ext4_super_block& super_block, const fs_state& state){
@@ -202,6 +256,11 @@ void command_export(const string source_path, const string target_path, fstream&
         return;
     }
 
+    if (entries[0].file_type != 1) {
+        cout << "export: " << source_path << ": Nao e um arquivo regular" << endl;
+        return;
+    }
+
     ext4_inode file_inode;
     read_inode(iso_file, sb, entries[0].inode, file_inode);
 
@@ -238,6 +297,11 @@ void command_export(const string source_path, const string target_path, fstream&
 // --- WRITE ---
 
 void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    if (!is_valid_entry_name(file)) {
+        cout << "touch: Nome invalido." << endl;
+        return;
+    }
+
     // 0. Verifica se o arquivo já existe no diretório atual
     auto existing = search_filedir(iso_file, sb, state.current_inode, file);
     if (!existing.empty()) {
@@ -257,11 +321,17 @@ void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state&
     new_inode.i_mode = 0x81A4; // 0x8000 (Arquivo Regular) + 0644 (Permissões rw-r--r--)
     new_inode.i_size_lo = 0;
     new_inode.i_links_count = 1;
+    new_inode.i_flags = EXT4_EXTENTS_FL;
     new_inode.i_ctime = new_inode.i_atime = new_inode.i_mtime = time(nullptr);
     
-    // Header mínimo de Extents
-    new_inode.i_block[0] = 0x0A;
-    new_inode.i_block[1] = 0xF3;
+    // Arquivo vazio: possui cabecalho de extents valido, mas sem extents alocados.
+    ext4_extent_header eh{};
+    eh.eh_magic = 0xF30A;
+    eh.eh_entries = 0;
+    eh.eh_max = 4;
+    eh.eh_depth = 0;
+    eh.eh_generation = 0;
+    memcpy(new_inode.i_block, &eh, sizeof(eh));
 
     // 3. Escreve o Inode no disco
     write_inode(iso_file, sb, new_inode_num, new_inode);
@@ -276,6 +346,11 @@ void touch(const string file, fstream& iso_file, ext4_super_block& sb, fs_state&
 }
 
 void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
+    if (!is_valid_entry_name(dir)) {
+        cout << "mkdir: Nome invalido." << endl;
+        return;
+    }
+
     // 0. Verifica se o nome já existe
     auto existing = search_filedir(iso_file, sb, state.current_inode, dir);
     if (!existing.empty()) {
@@ -300,6 +375,7 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
     new_inode.i_size_lo = block_size; // Um diretório começa ocupando 1 bloco
     new_inode.i_links_count = 2; // '.' e a si mesmo
     new_inode.i_blocks_lo = block_size / 512; // Número de setores (blocos de 512b)
+    new_inode.i_flags = EXT4_EXTENTS_FL;
     new_inode.i_ctime = new_inode.i_atime = new_inode.i_mtime = time(nullptr);
     
     // Criamos as structs locais e depois copiamos para o array i_block
@@ -326,6 +402,7 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
 
     // 3. Inicializa o novo bloco com '.' e '..'
     vector<char> dir_buffer(block_size, 0);
+    uint32_t dir_tail_size = ext4_has_metadata_csum(sb) ? 12 : 0;
     
     // Entrada '.'
     ext4_dir_entry_2* dot = reinterpret_cast<ext4_dir_entry_2*>(dir_buffer.data());
@@ -338,10 +415,12 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
     // Entrada '..' (usa todo o resto do bloco)
     ext4_dir_entry_2* dotdot = reinterpret_cast<ext4_dir_entry_2*>(dir_buffer.data() + dot->rec_len);
     dotdot->inode = state.current_inode;
-    dotdot->rec_len = block_size - dot->rec_len;
+    dotdot->rec_len = block_size - dot->rec_len - dir_tail_size;
     dotdot->name_len = 2;
     dotdot->file_type = 2;
     dotdot->name[0] = '.'; dotdot->name[1] = '.';
+
+    update_dir_block_checksum(iso_file, sb, new_inode_num, new_inode, dir_buffer.data(), block_size);
 
     // Grava o bloco do novo diretório no disco
     iso_file.seekp(new_block_num * block_size);
@@ -352,6 +431,8 @@ void mkdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
     bool success = add_dir_entry(iso_file, sb, state.current_inode, new_inode_num, dir, 2); // 2 = Directory
     
     if (success) {
+        update_group_used_dirs_count(iso_file, sb, new_inode_num, 1);
+
         // Incrementa o contador de links do diretório pai (por causa do '..')
         ext4_inode parent_inode;
         read_inode(iso_file, sb, state.current_inode, parent_inode);
@@ -374,7 +455,20 @@ void rm(const string file, fstream& iso_file, ext4_super_block& sb, fs_state& st
         return;
     }
 
-    // Libera o inode
+    ext4_inode target_inode;
+    read_inode(iso_file, sb, entries[0].inode, target_inode);
+
+    uint32_t block_size = 1024 << sb.s_log_block_size;
+    uint32_t logical_blocks = count_logical_blocks(inode_size_bytes(target_inode), block_size);
+
+    for (uint32_t logical_block = 0; logical_block < logical_blocks; logical_block++) {
+        uint64_t physical_block = get_physical_block(target_inode, logical_block);
+        if (physical_block != 0) {
+            free_block(iso_file, sb, physical_block);
+        }
+    }
+
+    // Libera o inode depois dos blocos de dados para nao perder a referencia aos extents.
     free_inode(iso_file, sb, entries[0].inode);
 
     // Remove do diretório pai
@@ -422,6 +516,7 @@ void rmdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
 
     // 2. Libera o Inode do diretório
     free_inode(iso_file, sb, target_inode_num);
+    update_group_used_dirs_count(iso_file, sb, target_inode_num, -1);
 
     // 3. Remove a entrada do diretório pai
     if (remove_dir_entry(iso_file, sb, state.current_inode, dir)) {
@@ -441,6 +536,11 @@ void rmdir(const string dir, fstream& iso_file, ext4_super_block& sb, fs_state& 
 void rename(const string file, const string new_file_name, fstream& iso_file, ext4_super_block& sb, fs_state& state) {
     if (file == "." || file == "..") {
         cout << "rename: Impossivel renomear atalhos de sistema." << endl;
+        return;
+    }
+
+    if (!is_valid_entry_name(new_file_name)) {
+        cout << "rename: Nome novo invalido." << endl;
         return;
     }
 
